@@ -167,15 +167,15 @@ On top of that core pipeline, ARGUS layers an AI Security Copilot: a chat interf
 
 | View | Preview |
 |---|---|
-| [Dashboard](dashboard.png) | `docs/screenshots/dashboard.png` |
-| [Login](login.png) | `docs/screenshots/login.png` |
-| [Assets](assets.png) | `docs/screenshots/assets.png` |
-| [Findings](findings.png) | `docs/screenshots/findings.png` |
-| [Reports](reports.png) | `docs/screenshots/reports.png` |
-| [AI Chat](ai-chat.png) | `docs/screenshots/ai-chat.png` |
+| [Dashboard](docs/screenshots/dashboard.png) | `docs/screenshots/dashboard.png` |
+| [Login](docs/screenshots/login.png) | `docs/screenshots/login.png` |
+| [Assets](docs/screenshots/assets.png) | `docs/screenshots/assets.png` |
+| [Findings](docs/screenshots/findings.png) | `docs/screenshots/findings.png` |
+| [Reports](docs/screenshots/reports.png) | `docs/screenshots/reports.png` |
+| [AI Chat](docs/screenshots/ai-chat.png) | `docs/screenshots/ai-chat.png` |
 | Telegram Bot | `docs/screenshots/telegram-bot.png` *(pending)* |
-| [Charts](charts.png) | `docs/screenshots/charts.png` |
-| [Risk Dashboard](risk-dashboard.png) | `docs/screenshots/risk-dashboard.png` |
+| [Charts](docs/screenshots/charts.png) | `docs/screenshots/charts.png` |
+| [Risk Dashboard](docs/screenshots/risk-dashboard.png) | `docs/screenshots/risk-dashboard.png` |
 
 ---
 
