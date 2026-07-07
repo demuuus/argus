@@ -536,10 +536,8 @@ ARGUS sedang dalam **pengembangan aktif**. Alur inti (pelacakan aset, pemindaian
 | Analisis AI CVE latar belakang otomatis | Diimplementasikan |
 | Pemindaian, snapshot, dan laporan terjadwal | Diimplementasikan |
 | Peta exposure tingkat kota | Diimplementasikan |
-| Peta risiko interaktif per-aset | Direncanakan |
-| REST/GraphQL API yang dipublikasikan | Direncanakan |
+| Peta risiko interaktif per-aset | Diimplementasikan |
 | Deployment Docker/terkontainerisasi | Direncanakan (baru berupa placeholder direktori) |
 | Kumpulan dokumentasi lanjutan (`docs/`) | Direncanakan (baru berupa placeholder direktori) |
-| Lisensi formal | Belum dideklarasikan |
 
 Proyek ini belum menjalani audit keamanan eksternal. Perlakukan sebagai proyek yang cocok untuk penggunaan pribadi, lab, atau evaluasi internal, dan tinjau [§11 Fitur Keamanan](#11-fitur-keamanan) serta [§21 Sangkalan](#21-sangkalan) sebelum melakukan deployment produksi apa pun.
