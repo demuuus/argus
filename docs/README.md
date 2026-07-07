@@ -446,9 +446,9 @@ The database schema does not need to be applied manually — both `app.py` and `
 
 | Document | Description | Status |
 |---|---|---|
-| `INSTALL.md` | Full installation and production deployment guide | (INSTALL.md) — see [§13](#13-installation-overview) for a quick start |
-| `API.md` | Dashboard route and JSON API reference | (API.md) — see [§14](#14-usage-overview) for an overview |
-| `ARCHITECTURE.md` | Extended architecture and data-flow documentation | (ARCHITECTURE.md) — see [§5](#5-system-architecture) and [§8](#8-core-components) |
+| `INSTALL.md` | Full installation and production deployment guide | [INSTALL.md](INSTALL.md) — see [§13](#13-installation-overview) for a quick start |
+| `API.md` | Dashboard route and JSON API reference | [API.md](API.md) — see [§14](#14-usage-overview) for an overview |
+| `ARCHITECTURE.md` | Extended architecture and data-flow documentation | [ARCHITECTURE.md](ARCHITECTURE.md) — see [§5](#5-system-architecture) and [§8](#8-core-components) |
 | `DATABASE.md` | Full schema reference | Not yet published — see `bot/database/schema.sql` and `bot/migrate.py` in the repository |
 | `AI.md` | AI Security Copilot design and prompt reference | Not yet published — see [§10](#10-ai-capabilities) |
 | `SECURITY.md` | Security model and responsible disclosure process | Not yet published — see [§11](#11-security-features) |
