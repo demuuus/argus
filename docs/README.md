@@ -538,10 +538,8 @@ ARGUS is under **active development**. The core pipeline (asset tracking, NVD/KE
 | Automated background CVE AI analysis | Implemented |
 | Scheduled scans, snapshots, and reports | Implemented |
 | City-level exposure map | Implemented |
-| Per-asset interactive risk map | Planned |
-| Published REST/GraphQL API | Planned |
+| Per-asset interactive risk map | Implemented |
 | Docker/containerized deployment | Planned (directory placeholder only) |
 | Extended documentation set (`docs/`) | Planned (directory placeholder only) |
-| Formal license | Not yet declared |
 
 This project has not undergone an external security audit. Treat it as suitable for personal, lab, or internal evaluation use, and review [§11 Security Features](#11-security-features) and [§21 Disclaimer](#21-disclaimer) before any production deployment.
