@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-title">Search: "{{ query }}"</div>
+
+<div class="panel mb-4">
+  <div class="panel-header">Assets</div>
+  <table class="table">
+    <thead><tr><th>ID</th><th>Vendor</th><th>Product</th></tr></thead>
+    <tbody>
+      {% for a in assets %}
+      <tr>
+        <td><a href="/asset/{{ a[0] }}">{{ a[0] }}</a></td>
+        <td>{{ a[1] }}</td>
+        <td>{{ a[2] }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="text-muted text-center py-3">No assets matched.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="panel">
+  <div class="panel-header">CVEs</div>
+  <table class="table">
+    <thead><tr><th>CVE ID</th><th>CVSS</th><th>KEV</th></tr></thead>
+    <tbody>
+      {% for c in cves %}
+      <tr>
+        <td><a href="/finding/{{ c[0] }}">{{ c[0] }}</a></td>
+        <td>{{ c[1] }}</td>
+        <td>{% if c[2] %}<span class="badge-kev">⚠ KEV</span>{% else %}<span class="badge-safe">—</span>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="3" class="text-muted text-center py-3">No CVEs matched.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

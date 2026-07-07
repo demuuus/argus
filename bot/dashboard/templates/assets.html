@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Assets — Argus{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <div class="d-flex align-items-center gap-3">
+    <div class="page-title mb-0">Assets</div>
+    <span class="text-muted" style="font-size:.82rem">{{ total_assets }} total</span>
+  </div>
+  <a href="/add_asset" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Add Asset</a>
+</div>
+
+<!-- City/Country filter -->
+<div class="panel p-3 mb-3">
+  <form method="GET" class="d-flex align-items-center gap-2 flex-wrap">
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <select name="country" class="form-select form-select-sm" id="filterCountry" style="width:auto">
+      <option value="">All Countries</option>
+      {% for code, info in supported_locations.items() %}
+      <option value="{{ code }}" {% if country_filter == code %}selected{% endif %}>{{ info.name }}</option>
+      {% endfor %}
+    </select>
+    <select name="city" class="form-select form-select-sm" id="filterCity" style="width:auto">
+      <option value="">All Cities</option>
+      {% if country_filter %}
+        {% for c in supported_locations[country_filter].cities %}
+        <option value="{{ c }}" {% if city_filter == c %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      {% endif %}
+    </select>
+    <select name="exposure" class="form-select form-select-sm" style="width:auto">
+      <option value="">All Exposure</option>
+      {% for e in valid_exposures %}
+      <option value="{{ e }}" {% if exposure_filter == e %}selected{% endif %}>{{ e }}</option>
+      {% endfor %}
+    </select>
+    <select name="function" class="form-select form-select-sm" style="width:auto">
+      <option value="">All Functions</option>
+      {% for f in valid_functions %}
+      <option value="{{ f }}" {% if function_filter == f %}selected{% endif %}>{{ f }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-funnel me-1"></i>Filter
+    </button>
+    {% if country_filter or city_filter or exposure_filter or function_filter %}
+    <span class="text-muted" style="font-size:.8rem">
+      <i class="bi bi-info-circle me-1"></i>Filtering: {{ supported_locations[country_filter].name if country_filter else '' }}{% if city_filter %} / {{ city_filter }}{% endif %}{% if exposure_filter %} / {{ exposure_filter }}{% endif %}{% if function_filter %} / {{ function_filter }}{% endif %}
+    </span>
+    <a href="/assets?sort={{ sort }}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-x me-1"></i>Clear Filter
+    </a>
+    {% endif %}
+  </form>
+</div>
+
+<script>
+// Re-fetch the country->city mapping for THIS page's filter dropdown
+// (separate instance from the add/edit asset forms' dropdowns — same
+// SUPPORTED_LOCATIONS source of truth, rendered fresh here).
+const ASSETS_FILTER_LOCATIONS = {{ supported_locations | tojson | safe }};
+
+document.getElementById("filterCountry").addEventListener("change", (e) => {
+  const citySelect = document.getElementById("filterCity");
+  const countryCode = e.target.value;
+  citySelect.innerHTML = '<option value="">All Cities</option>';
+  if (countryCode && ASSETS_FILTER_LOCATIONS[countryCode]) {
+    ASSETS_FILTER_LOCATIONS[countryCode].cities.forEach((city) => {
+      const opt = document.createElement("option");
+      opt.value = city;
+      opt.textContent = city;
+      citySelect.appendChild(opt);
+    });
+  }
+});
+</script>
+
+<div class="panel">
+  {% macro sort_th(label, asc_key, desc_key) %}
+  {% set is_asc = sort == asc_key %}
+  {% set is_desc = sort == desc_key %}
+  {% set next = desc_key if is_asc else asc_key %}
+  <th class="{{ 'active-sort' if (is_asc or is_desc) else '' }}">
+    <a href="/assets?sort={{ next }}{% if country_filter %}&country={{ country_filter }}{% endif %}{% if city_filter %}&city={{ city_filter | urlencode }}{% endif %}{% if exposure_filter %}&exposure={{ exposure_filter }}{% endif %}{% if function_filter %}&function={{ function_filter | urlencode }}{% endif %}"
+       class="d-flex align-items-center gap-1 text-decoration-none" style="color:inherit">
+      {{ label }}
+      <span class="sort-icon">
+        {% if is_asc %}↑{% elif is_desc %}↓{% else %}↕{% endif %}
+      </span>
+    </a>
+  </th>
+  {% endmacro %}
+
+  <table class="table">
+    <thead>
+      <tr>
+        <th>No.</th>
+        {{ sort_th("ID", "id_asc", "id_desc") }}
+        {{ sort_th("Vendor", "vendor_asc", "vendor_desc") }}
+        {{ sort_th("Product", "product_asc", "product_desc") }}
+        <th>Version</th>
+        {{ sort_th("Priority", "priority_asc", "priority_desc") }}
+        <th>Owner</th>
+        <th>Exposure</th>
+        <th>Function</th>
+        <th>City</th>
+        <th>Notes</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in assets %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td><a href="/asset/{{ a[0] }}">{{ a[0] }}</a></td>
+        <td>{{ a[1] }}</td>
+        <td>{{ a[2] }}</td>
+        <td><span class="text-muted">{{ a[3] }}</span></td>
+        <td>
+          {% set p = a[4] or '' %}
+          {% if p == 'Critical' %}<span class="badge-kev">{{ p }}</span>
+          {% elif p == 'High'   %}<span style="color:#f7a14f;font-weight:600">{{ p }}</span>
+          {% elif p == 'Medium' %}<span style="color:#ffc107;font-weight:600">{{ p }}</span>
+          {% elif p == 'Low'    %}<span style="color:#4fcf8e">{{ p }}</span>
+          {% else %}<span class="text-muted">{{ p or '—' }}</span>{% endif %}
+        </td>
+        <td>{{ a[5] or '—' }}</td>
+        <td>
+          {% if a[9] == 'External' %}<span style="color:#f75f5f;font-weight:600">External</span>
+          {% else %}<span class="text-muted">Internal</span>{% endif %}
+        </td>
+        <td>{{ a[10] or '—' }}</td>
+        <td>
+          {% if a[7] %}{{ a[7] }} <span class="text-muted" style="font-size:.75rem">({{ a[8] }})</span>
+          {% else %}<span class="text-muted">Not specified</span>{% endif %}
+        </td>
+        <td style="max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{{ a[6] or '' }}">
+          {{ a[6] or '—' }}
+        </td>
+        <td>
+          <a href="/edit_asset/{{ a[0] }}" class="btn btn-outline-secondary btn-sm me-1"><i class="bi bi-pencil"></i></a>
+          <form method="POST" action="/delete_asset/{{ a[0] }}" style="display:inline" onsubmit="return confirm('Delete asset {{ a[0] }}?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-sm"
+                    style="color:#f75f5f;border:1px solid rgba(247,95,95,.3)">
+              <i class="bi bi-trash"></i>
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="12" class="text-muted text-center py-4">No assets found.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

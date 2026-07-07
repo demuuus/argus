@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block title %}Findings — Argus{% endblock %}
+{% block content %}
+
+{#
+  findings row indices (11 columns):
+  [0] cve_id
+  [1] cvss
+  [2] kev
+  [3] max_risk
+  [4] epss
+  [5] epss_percentile
+  [6] asset_count
+  [7] top_asset
+  [8] any_patched
+  [9] status
+  [10] ai_status  (Phase 6 Requirement 9: NULL = never queued, 'pending'/'processing' = in queue, 'complete' = analyzed, 'failed' = analysis errored)
+#}
+
+{# Build base query string preserving all active filters for pagination/sort links #}
+{% set base_qs %}sort={{ sort }}&per_page={{ per_page }}{% if vendor_filter %}&vendor={{ vendor_filter }}{% endif %}{% if risk_filter %}&risk={{ risk_filter }}{% endif %}{% if kev_filter %}&kev={{ kev_filter }}{% endif %}{% if keyword_filter %}&keyword={{ keyword_filter }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if country_filter %}&country={{ country_filter }}{% endif %}{% if city_filter %}&city={{ city_filter | urlencode }}{% endif %}{% if ref %}&ref={{ ref }}{% endif %}{% endset %}
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <div class="d-flex align-items-center gap-2">
+    {% if back_url %}
+    <a href="{{ back_url }}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-chevron-left me-1"></i>Charts
+    </a>
+    {% endif %}
+    <div class="page-title mb-0">
+      Findings
+      {% if vendor_filter %}<small class="text-muted ms-2" style="font-size:.75rem">vendor: {{ vendor_filter }}</small>{% endif %}
+      {% if risk_filter   %}<small class="text-muted ms-2" style="font-size:.75rem">risk: {{ risk_filter }}</small>{% endif %}
+      {% if kev_filter == 'true'  %}<small class="text-muted ms-2" style="font-size:.75rem">KEV only</small>{% endif %}
+      {% if kev_filter == 'false' %}<small class="text-muted ms-2" style="font-size:.75rem">Non-KEV only</small>{% endif %}
+      {% if status_filter %}<small class="text-muted ms-2" style="font-size:.75rem">status: {{ status_filter }}</small>{% endif %}
+      {% if country_filter %}<small class="text-muted ms-2" style="font-size:.75rem">location: {{ country_filter }}{% if city_filter %} / {{ city_filter }}{% endif %}</small>{% endif %}
+    </div>
+  </div>
+  <small class="text-muted">{{ total }} unique CVEs</small>
+</div>
+
+<!-- Search and filter bar -->
+<div class="panel p-3 mb-3">
+  <form method="GET" class="d-flex align-items-center gap-2 flex-wrap">
+    <input type="hidden" name="sort"     value="{{ sort }}">
+    {% if vendor_filter %}<input type="hidden" name="vendor" value="{{ vendor_filter }}">{% endif %}
+    {% if risk_filter   %}<input type="hidden" name="risk"   value="{{ risk_filter }}">{% endif %}
+    {% if kev_filter    %}<input type="hidden" name="kev"    value="{{ kev_filter }}">{% endif %}
+    {% if ref           %}<input type="hidden" name="ref"    value="{{ ref }}">{% endif %}
+
+    <div class="input-group" style="max-width:320px">
+      <input class="form-control form-control-sm" type="search" name="keyword" placeholder="Search CVE, vendor, product…" value="{{ keyword_filter }}">
+      <button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-search"></i></button>
+    </div>
+
+    <select name="status" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+      <option value="">All Statuses</option>
+      {% for s in ['Open','In Progress','Resolved','Accepted Risk','False Positive'] %}
+      <option value="{{ s }}" {% if status_filter == s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+
+    <select name="country" class="form-select form-select-sm" id="findingsCountry" style="width:auto" onchange="this.form.submit()">
+      <option value="">All Countries</option>
+      {% for code, info in supported_locations.items() %}
+      <option value="{{ code }}" {% if country_filter == code %}selected{% endif %}>{{ info.name }}</option>
+      {% endfor %}
+    </select>
+    <select name="city" class="form-select form-select-sm" id="findingsCity" style="width:auto" onchange="this.form.submit()">
+      <option value="">All Cities</option>
+      {% if country_filter %}
+        {% for c in supported_locations[country_filter].cities %}
+        <option value="{{ c }}" {% if city_filter == c %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      {% endif %}
+    </select>
+
+    {% if vendor_filter or risk_filter or kev_filter or keyword_filter or status_filter or country_filter or city_filter %}
+    <a href="/findings{% if ref %}?ref={{ ref }}{% endif %}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-x me-1"></i>Clear Filters
+    </a>
+    {% endif %}
+
+    <div class="ms-auto d-flex align-items-center gap-2">
+      <span class="text-muted" style="font-size:.8rem">Per page</span>
+      <select name="per_page" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+        {% for n in [25, 50, 100, 200] %}
+        <option value="{{ n }}" {% if per_page == n %}selected{% endif %}>{{ n }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+</div>
+
+<script>
+const FINDINGS_FILTER_LOCATIONS = {{ supported_locations | tojson | safe }};
+document.getElementById("findingsCountry").addEventListener("change", (e) => {
+  const citySelect = document.getElementById("findingsCity");
+  const countryCode = e.target.value;
+  citySelect.innerHTML = '<option value="">All Cities</option>';
+  if (countryCode && FINDINGS_FILTER_LOCATIONS[countryCode]) {
+    FINDINGS_FILTER_LOCATIONS[countryCode].cities.forEach((city) => {
+      const opt = document.createElement("option");
+      opt.value = city;
+      opt.textContent = city;
+      citySelect.appendChild(opt);
+    });
+  }
+  // Country changed -> the previously selected city (from a different
+  // country) is no longer valid, so submit immediately with city reset
+  // rather than letting the user submit a stale, now-mismatched pair.
+  e.target.form.submit();
+});
+</script>
+
+{% macro sort_th(label, asc_key, desc_key) %}
+  {% set is_asc  = sort == asc_key %}
+  {% set is_desc = sort == desc_key %}
+  {% set next    = desc_key if is_asc else asc_key %}
+  <th class="{{ 'active-sort' if (is_asc or is_desc) else '' }}">
+    <a href="/findings?sort={{ next }}&page=1&per_page={{ per_page }}{% if vendor_filter %}&vendor={{ vendor_filter }}{% endif %}{% if risk_filter %}&risk={{ risk_filter }}{% endif %}{% if kev_filter %}&kev={{ kev_filter }}{% endif %}{% if keyword_filter %}&keyword={{ keyword_filter }}{% endif %}{% if status_filter %}&status={{ status_filter }}{% endif %}{% if country_filter %}&country={{ country_filter }}{% endif %}{% if city_filter %}&city={{ city_filter | urlencode }}{% endif %}{% if ref %}&ref={{ ref }}{% endif %}"
+       class="d-flex align-items-center gap-1 text-decoration-none" style="color:inherit">
+      {{ label }}
+      <span class="sort-icon">{% if is_asc %}↑{% elif is_desc %}↓{% else %}↕{% endif %}</span>
+    </a>
+  </th>
+{% endmacro %}
+
+<div class="panel">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>No.</th>
+        <th>Top Asset</th>
+        {{ sort_th("CVE ID",   "cve_asc",  "cve_desc") }}
+        {{ sort_th("CVSS",     "cvss_asc", "cvss_desc") }}
+        {{ sort_th("KEV",      "kev_asc",  "kev_desc") }}
+        {{ sort_th("Max Risk", "risk_asc", "risk_desc") }}
+        {{ sort_th("EPSS",     "epss_asc", "epss_desc") }}
+        <th title="Assets affected">Assets</th>
+        <th>Status</th>
+        <th>Patched</th>
+        <th title="Whether ARGUS AI has generated a written analysis for this CVE">AI Analysis</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in findings %}
+      <tr class="{% if f[8] %}opacity-50{% endif %}">
+        <td>{{ ((page - 1) * per_page) + loop.index }}</td>
+        <td><span class="text-muted" style="font-size:.82rem">{{ f[7] or '—' }}</span></td>
+        <td><a href="/finding/{{ f[0] }}{% if ref %}?ref={{ ref }}{% endif %}">{{ f[0] }}</a></td>
+        <td>{{ f[1] }}</td>
+        <td>{% if f[2] %}<span class="badge-kev">⚠ KEV</span>{% else %}<span class="badge-safe">—</span>{% endif %}</td>
+        <td class="{% if f[3] > 175 %}risk-high{% elif f[3] > 125 %}risk-med{% else %}risk-low{% endif %}">{{ f[3] }}</td>
+        <td>
+          {{ "%.2f"|format((f[4] or 0) * 100) }}%
+          <br><small class="text-muted">P{{ "%.0f"|format((f[5] or 0) * 100) }}</small>
+        </td>
+        <td><span class="text-muted" style="font-size:.8rem">{{ f[6] }}</span></td>
+        <td>
+          {% set st = f[9] or 'Open' %}
+          {% if st == 'Open' %}
+            <span class="badge" style="background:rgba(247,95,95,.2);color:#f75f5f">Open</span>
+          {% elif st == 'In Progress' %}
+            <span class="badge" style="background:rgba(255,193,7,.2);color:#ffc107">In Progress</span>
+          {% elif st == 'Resolved' %}
+            <span class="badge" style="background:rgba(79,207,142,.2);color:#4fcf8e">Resolved</span>
+          {% elif st == 'Accepted Risk' %}
+            <span class="badge" style="background:rgba(79,142,247,.2);color:#4f8ef7">Accepted Risk</span>
+          {% else %}
+            <span class="badge" style="background:rgba(122,134,154,.2);color:#7a869a">False Positive</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if f[8] %}
+            <span style="color:#4fcf8e;font-size:.75rem;font-weight:600">✓</span>
+          {% else %}
+            <span class="text-muted" style="font-size:.75rem">—</span>
+          {% endif %}
+        </td>
+        <td>
+          {% set ai_st = f[10] %}
+          {% if ai_st == 'complete' %}
+            <span class="badge" style="background:rgba(79,207,142,.2);color:#4fcf8e" title="ARGUS AI has generated a full analysis for this CVE">
+              <i class="bi bi-check-circle me-1"></i>Complete
+            </span>
+          {% elif ai_st == 'processing' %}
+            <span class="badge" style="background:rgba(79,142,247,.2);color:#4f8ef7" title="ARGUS AI is analyzing this CVE right now">
+              <i class="bi bi-arrow-repeat me-1"></i>Analyzing
+            </span>
+          {% elif ai_st == 'pending' %}
+            <span class="badge" style="background:rgba(255,193,7,.2);color:#ffc107" title="Queued for analysis, waiting for the next background run">
+              <i class="bi bi-hourglass-split me-1"></i>Pending
+            </span>
+          {% elif ai_st == 'failed' %}
+            <span class="badge" style="background:rgba(247,95,95,.2);color:#f75f5f" title="Analysis failed and will be retried automatically">
+              <i class="bi bi-exclamation-triangle me-1"></i>Failed
+            </span>
+          {% else %}
+            <span class="text-muted" style="font-size:.75rem" title="Not yet queued for analysis">—</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="11" class="text-muted text-center py-4">No findings.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="d-flex align-items-center justify-content-between p-3 border-top"
+       style="border-color:var(--argus-border)!important">
+    <div class="pagination-bar">
+      {% if page > 1 %}
+      <a class="btn btn-outline-secondary btn-sm" href="/findings?{{ base_qs }}&page={{ page - 1 }}">
+        <i class="bi bi-chevron-left"></i> Prev
+      </a>
+      {% endif %}
+      <span class="page-info">Page {{ page }} / {{ total_pages }}</span>
+      {% if page < total_pages %}
+      <a class="btn btn-outline-secondary btn-sm" href="/findings?{{ base_qs }}&page={{ page + 1 }}">
+        Next <i class="bi bi-chevron-right"></i>
+      </a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="page-title mb-4">CVE Search</div>
+
+<form method="GET" action="/cves" class="mb-4">
+    <div class="input-group">
+        <input type="text" class="form-control" name="q" value="{{ keyword }}" placeholder="Search CVE, vendor, product, description...">
+        <button class="btn btn-primary" type="submit">Search</button>
+    </div>
+</form>
+
+{% if error %}
+<div class="alert alert-warning">
+    {{ error }}
+</div>
+{% endif %}
+
+<div class="panel">
+    <div class="table-responsive">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>CVE</th>
+                    <th>CVSS</th>
+                    <th>KEV</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+
+            <tbody>
+                {% for row in results %}
+                <tr>
+                    <td>
+                        <a href="/cve/{{ row[0] }}" class="text-decoration-none">{{ row[0] }}</a>
+                    </td>
+
+                    <td>
+                        {{ row[2] }}
+                    </td>
+
+                    <td>
+                        {% if row[3] %}
+                            <span class="badge bg-danger">KEV</span>
+                        {% else %}
+                            <span class="badge bg-secondary">No</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {{ row[1] }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}

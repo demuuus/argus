@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Charts — Argus{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <div class="page-title mb-0">Charts</div>
+  <div class="dropdown">
+    <button class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown">
+      <i class="bi bi-bar-chart me-1"></i>Jump to Chart
+    </button>
+    <ul class="dropdown-menu dropdown-menu-end">
+      <li><a class="dropdown-item" href="#assets-chart">Top Assets by Findings</a></li>
+      <li><a class="dropdown-item" href="#risk-chart">Risk Distribution</a></li>
+      <li><a class="dropdown-item" href="#kev-chart">KEV vs Non-KEV</a></li>
+      <li><a class="dropdown-item" href="#vendor-chart">Top Vendors</a></li>
+    </ul>
+  </div>
+</div>
+
+<div class="row g-4">
+
+  <!-- Top Assets -->
+  <div class="col-12" id="assets-chart">
+    <div class="chart-box">
+      <div class="panel-header mb-3">
+        <i class="bi bi-hdd-stack me-2"></i>Top Assets by Findings
+      </div>
+      <div class="chart-large">
+        <canvas id="chartAssets"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Risk Distribution + KEV Pie side by side -->
+  <div class="col-lg-8" id="risk-chart">
+    <div class="chart-box" style="height:100%">
+      <div class="panel-header mb-3">
+        <i class="bi bi-graph-up me-2"></i>Risk Score Distribution
+      </div>
+      <div style="height:320px; position:relative;">
+        <canvas id="chartRisk"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4" id="kev-chart">
+    <div class="chart-box" style="height:100%">
+      <div class="panel-header mb-3">
+        <i class="bi bi-pie-chart me-2"></i>KEV vs Non-KEV
+      </div>
+      <div style="height:320px; position:relative;">
+        <canvas id="chartKEV"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Top Vendors -->
+  <div class="col-12" id="vendor-chart">
+    <div class="chart-box">
+      <div class="panel-header mb-3">
+        <i class="bi bi-building me-2"></i>Top Vendors by Findings
+      </div>
+      <div style="height:400px; position:relative;">
+        <canvas id="chartVendor"></canvas>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script src="{{ url_for('static', filename='charts/top_assets.js') }}"></script>
+<script src="{{ url_for('static', filename='charts/risk_distribution.js') }}"></script>
+<script src="{{ url_for('static', filename='charts/kev_chart.js') }}"></script>
+<script src="{{ url_for('static', filename='charts/vendor_chart.js') }}"></script>
+{% endblock %}

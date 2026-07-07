@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='assets/ARGUS PENOPTES.png') }}">
+  <title>{% block title %}Argus{% endblock %}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500;1,600&display=swap" rel="stylesheet">
+</head>
+
+<body>
+<nav class="navbar navbar-expand-lg">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="/">
+      <img
+      id="argusLogo"
+      src="{{ url_for('static', filename='assets/ARGUS W.png') }}" 
+      data-dark-logo="{{ url_for('static', filename='assets/ARGUS W.png') }}"
+      data-light-logo="{{ url_for('static', filename='assets/ARGUS B.png') }}"
+      alt="ARGUS"
+      width="50" height="50"></a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain" aria-controls="navMain" aria-expanded="false" aria-label="Toggle navigation">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+
+    <button id="ai-toggle" type="button" aria-label="Open ARGUS AI">
+      <img
+        class="ai-toggle-logo"
+        src="{{ url_for('static', filename='assets/ARGUS W.png') }}"
+        data-dark-logo="{{ url_for('static', filename='assets/ARGUS W.png') }}"
+        data-light-logo="{{ url_for('static', filename='assets/ARGUS B.png') }}"
+        alt="ARGUS">
+    </button>
+    <div id="ai-panel">
+      <div id="ai-sidebar">
+        <div id="ai-sidebar-header">
+          <span>Conversations</span>
+          <button id="ai-new-conv" title="New conversation"><i class="bi bi-plus-lg"></i></button>
+        </div>
+        <div id="ai-conv-list"></div>
+      </div>
+      <div id="ai-main">
+        <div id="ai-conv-title-bar">
+          <span id="ai-conv-title">New conversation</span>
+          <button id="ai-rename-conv" title="Rename"><i class="bi bi-pencil"></i></button>
+          <button id="ai-delete-conv" title="Delete"><i class="bi bi-trash"></i></button>
+        </div>
+        <div id="ai-messages"></div>
+        <div class="p-2 border-top">
+          <div class="input-group">
+            <input id="ai-input" class="form-control" placeholder="Ask ARGUS AI...">
+            <button id="ai-send" class="btn btn-primary">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="collapse navbar-collapse" id="navMain">
+
+      {# ── Left nav links ── #}
+      <ul class="navbar-nav me-auto gap-1">
+        {% if current_user.is_authenticated %}
+          {% set nav_items = [
+            ('/dashboard', 'bi-speedometer2', 'Dashboard'),
+            ('/assets',    'bi-hdd-stack',    'Assets'),
+            ('/findings',  'bi-bug',           'Findings'),
+            ('/patch_plan','bi-calendar-check','Patch Plan'),
+            ('/reports',   'bi-file-earmark-text', 'Reports'),
+            ('/charts',    'bi-bar-chart-line','Charts'),
+            ('/docs',      'bi-book',          'Docs'),
+          ] %}
+          {% for href, icon, label in nav_items %}
+          <li class="nav-item">
+            <a class="nav-link {% if request.path == href %}active{% endif %}"
+               href="{{ href }}">
+              <i class="bi {{ icon }} me-1"></i>{{ label }}
+            </a>
+          </li>
+          {% endfor %}
+        {% else %}
+          {% set pub_items = [
+            ('/', 'bi-house', 'Home'),
+            ('/features', 'bi-stars', 'Features'),
+            ('/basics', 'bi-info-circle', 'Basics'),
+            ('/cves', 'bi-search', 'CVE Search'),
+            ('/docs', 'bi-book', 'Docs'),
+          ] %}
+          {% for href, icon, label in pub_items %}
+          <li class="nav-item">
+            <a class="nav-link {% if request.path == href %}active{% endif %}"
+               href="{{ href }}">
+              <i class="bi {{ icon }} me-1"></i>{{ label }}
+            </a>
+          </li>
+          {% endfor %}
+        {% endif %}
+      </ul>
+
+      {# ── Right side ── #}
+      <div class="d-flex align-items-center gap-2">
+
+        {# Theme toggle #}
+        <button class="btn btn-outline-secondary btn-sm theme-btn-margin"
+                onclick="toggleTheme()" id="themeBtn" title="Toggle theme">
+          <i class="bi bi-moon-stars" id="themeIcon"></i>
+        </button>
+
+        {# Search form #}
+        {% if current_user.is_authenticated %}
+        <form class="d-flex" action="/search" method="get">
+          <div class="input-group" style="width:230px">
+            <input class="form-control" type="search" name="q"
+                   placeholder="Search assets or CVEs…" style="border-radius:8px 0 0 8px; height:34px">
+            <button class="btn btn-outline-secondary" type="submit"
+                    style="border-radius:0 8px 8px 0; height:34px; padding:0 .7rem">
+              <i class="bi bi-search" style="font-size:.8rem"></i>
+            </button>
+          </div>
+        </form>
+        {% else %}
+        <form class="d-flex" action="/cves" method="get">
+          <div class="input-group" style="width:230px">
+            <input class="form-control" type="search" name="q"
+                   placeholder="Search CVEs…" style="border-radius:8px 0 0 8px; height:34px">
+            <button class="btn btn-outline-secondary" type="submit"
+                    style="border-radius:0 8px 8px 0; height:34px; padding:0 .7rem">
+              <i class="bi bi-search" style="font-size:.8rem"></i>
+            </button>
+          </div>
+        </form>
+        {% endif %}
+
+        {# Auth buttons #}
+        {% if current_user.is_authenticated %}
+          <div class="d-flex align-items-center gap-2 ms-1">
+            <div class="dropdown">
+              <button class="btn btn-outline-secondary btn-sm dropdown-toggle d-flex align-items-center gap-1"
+                      data-bs-toggle="dropdown" aria-expanded="false"
+                      style="font-size:.78rem; border-color:var(--argus-border)">
+                <i class="bi bi-person-circle"></i>
+                <span>{{ current_user.username }}</span>
+                {% if current_user.role == 'admin' %}
+                  <span class="badge-kev" style="font-size:.6rem; padding:.1rem .35rem">admin</span>
+                {% endif %}
+              </button>
+              <ul class="dropdown-menu dropdown-menu-end">
+                <li>
+                  <a class="dropdown-item" href="/profile">
+                    <i class="bi bi-person-gear me-2"></i>Profile
+                  </a>
+                </li>
+                <li><hr class="dropdown-divider" style="border-color:var(--argus-border)"></li>
+                <li>
+                  <form method="POST" action="{{ url_for('logout') }}" class="d-inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="dropdown-item border-0 bg-transparent w-100 text-start">
+                    <i class="bi bi-box-arrow-right me-2"></i>Logout</button>
+                  </form>
+                </a>
+              </li>
+            </ul>
+          </div>
+        </div>
+        {% else %}
+        <a href="{{ url_for('login') }}" class="btn btn-outline-secondary btn-sm">Login</a>
+        <a href="/register" class="btn btn-primary btn-sm">Register</a>
+        {% endif %}
+      </div>
+    </div><!-- /.collapse -->
+  </div><!-- /.container-fluid -->
+</nav>
+
+<div class="container-fluid py-4">
+  {% block content %}{% endblock %}
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem("theme", theme);
+
+  const icon = document.getElementById("themeIcon");
+  if (icon) {
+    icon.className = theme === "dark"
+    ? "bi bi-moon-stars"
+    : "bi bi-sun";
+  }
+
+  document.querySelectorAll("[data-dark-logo][data-light-logo]").forEach((logo) => {
+  logo.src = theme === "dark"
+    ? logo.dataset.darkLogo
+    : logo.dataset.lightLogo;
+  });
+
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute("data-theme") || "dark";
+  applyTheme(current === "dark" ? "light" : "dark");
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const saved = localStorage.getItem("theme") || "dark";
+  applyTheme(saved);
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+    const btn = document.getElementById("ai-toggle");
+    const panel = document.getElementById("ai-panel");
+    const messages = document.getElementById("ai-messages");
+    const convList = document.getElementById("ai-conv-list");
+    const convTitle = document.getElementById("ai-conv-title");
+    const input = document.getElementById("ai-input");
+    const sendBtn = document.getElementById("ai-send");
+    const newConvBtn = document.getElementById("ai-new-conv");
+    const renameBtn = document.getElementById("ai-rename-conv");
+    const deleteBtn = document.getElementById("ai-delete-conv");
+
+    if (!btn || !panel) return;
+
+    // The active conversation persists across page navigation and reloads
+    // via localStorage, then its full history is fetched from the server
+    // (the server is the source of truth — localStorage just remembers
+    // *which* conversation to reopen, not the messages themselves).
+    let activeConversationId = localStorage.getItem("argus_active_conversation") || null;
+
+    panel.style.display = "none";
+    btn.addEventListener("click", () => {
+        const opening = panel.style.display === "none";
+        panel.style.display = opening ? "flex" : "none";
+        if (opening) refreshConversationList();
+    });
+
+    function renderMessage(role, content, meta) {
+        const label = role === "user"
+            ? `<i class="bi bi-person-fill"></i> You`
+            : `<img src="{{ url_for('static', filename='assets/ARGUS W.png') }}" width="16" height="16">RGUS AI`;
+        const cls = role === "user" ? "user-message" : "ai-message";
+        const body = role === "user" ? escapeHtml(content) : marked.parse(content);
+        const metaHtml = meta
+            ? `<div style="font-size:11px;opacity:.6;margin-top:10px">${meta}</div>`
+            : "";
+        const div = document.createElement("div");
+        div.className = `message ${cls}`;
+        div.innerHTML = `<div class="msg-label">${label}</div>${body}${metaHtml}`;
+        messages.appendChild(div);
+    }
+
+    function escapeHtml(s) {
+        const d = document.createElement("div");
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    async function loadConversation(conversationId) {
+        messages.innerHTML = "";
+        if (!conversationId) {
+            convTitle.textContent = "New conversation";
+            return;
+        }
+        try {
+            const res = await fetch(`/api/conversations/${conversationId}`);
+            if (!res.ok) {
+                // Conversation was deleted or doesn't belong to this user —
+                // fall back to a fresh, empty conversation rather than erroring.
+                activeConversationId = null;
+                localStorage.removeItem("argus_active_conversation");
+                convTitle.textContent = "New conversation";
+                return;
+            }
+            const data = await res.json();
+            convTitle.textContent = data.conversation.title;
+            data.messages.forEach(m => renderMessage(m.role, m.content));
+            messages.scrollTop = messages.scrollHeight;
+            if (window.hljs) hljs.highlightAll();
+        } catch (err) {
+            console.error("Failed to load conversation:", err);
+        }
+    }
+
+    async function refreshConversationList() {
+        try {
+            const res = await fetch("/api/conversations");
+            const data = await res.json();
+            convList.innerHTML = "";
+            data.conversations.forEach(c => {
+                const item = document.createElement("div");
+                item.className = "ai-conv-item" + (String(c.id) === String(activeConversationId) ? " active" : "");
+                item.textContent = c.title;
+                item.dataset.id = c.id;
+                item.addEventListener("click", () => selectConversation(c.id));
+                convList.appendChild(item);
+            });
+        } catch (err) {
+            console.error("Failed to list conversations:", err);
+        }
+    }
+
+    async function selectConversation(conversationId) {
+        activeConversationId = conversationId;
+        localStorage.setItem("argus_active_conversation", conversationId);
+        await loadConversation(conversationId);
+        refreshConversationList();
+    }
+
+    newConvBtn.addEventListener("click", async () => {
+        activeConversationId = null;
+        localStorage.removeItem("argus_active_conversation");
+        messages.innerHTML = "";
+        convTitle.textContent = "New conversation";
+        refreshConversationList();
+    });
+
+    renameBtn.addEventListener("click", async () => {
+        if (!activeConversationId) return;
+        const newTitle = prompt("Rename conversation:", convTitle.textContent);
+        if (!newTitle || !newTitle.trim()) return;
+        try {
+            await fetch(`/api/conversations/${activeConversationId}/rename`, {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({title: newTitle.trim()}),
+            });
+            convTitle.textContent = newTitle.trim();
+            refreshConversationList();
+        } catch (err) {
+            console.error("Failed to rename conversation:", err);
+        }
+    });
+
+    deleteBtn.addEventListener("click", async () => {
+        if (!activeConversationId) return;
+        if (!confirm("Delete this conversation? This cannot be undone.")) return;
+        try {
+            await fetch(`/api/conversations/${activeConversationId}`, {method: "DELETE"});
+            activeConversationId = null;
+            localStorage.removeItem("argus_active_conversation");
+            messages.innerHTML = "";
+            convTitle.textContent = "New conversation";
+            refreshConversationList();
+        } catch (err) {
+            console.error("Failed to delete conversation:", err);
+        }
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        sendBtn.click();
+      }
+    });
+
+    sendBtn.addEventListener("click", async () => {
+        const message = input.value.trim();
+        if (!message) return;
+
+        renderMessage("user", message);
+        input.value = "";
+        messages.scrollTop = messages.scrollHeight;
+
+        const thinkingDiv = document.createElement("div");
+        thinkingDiv.className = "message ai-message";
+        thinkingDiv.innerHTML = `
+          <div class="msg-label"><img src="{{ url_for('static', filename='assets/ARGUS W.png') }}" width="16" height="16">RGUS AI</div>
+          <div class="thinking"><span></span><span></span><span></span></div>
+        `;
+        messages.appendChild(thinkingDiv);
+        messages.scrollTop = messages.scrollHeight;
+
+        try {
+          const startTime = performance.now();
+          const response = await fetch("/api/chat", {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify({
+                  message,
+                  conversation_id: activeConversationId,
+              }),
+          });
+          const data = await response.json();
+          const endTime = performance.now();
+          const seconds = ((endTime - startTime) / 1000).toFixed(2);
+          const tps = data.tokens && seconds > 0 ? (data.tokens / seconds).toFixed(1) : "?";
+
+          // The server may have created a brand-new conversation for this
+          // message (first message ever, or a stale/deleted id) — adopt
+          // whatever conversation_id it echoes back as the new source of truth.
+          if (data.conversation_id && String(data.conversation_id) !== String(activeConversationId)) {
+              activeConversationId = data.conversation_id;
+              localStorage.setItem("argus_active_conversation", activeConversationId);
+              refreshConversationList();
+          }
+
+          thinkingDiv.innerHTML = `
+              <div class="msg-label"><img src="{{ url_for('static', filename='assets/ARGUS W.png') }}" width="16" height="16">RGUS AI</div>
+              ${marked.parse(data.response)}
+              <div style="font-size:11px;opacity:.6;margin-top:10px">
+                  ${data.tokens || "?"} tokens • ${seconds}s • ${tps} tok/s
+              </div>
+          `;
+          if (window.hljs) hljs.highlightAll();
+        } catch (err) {
+            thinkingDiv.innerHTML = `
+              <div class="msg-label"><img src="{{ url_for('static', filename='assets/ARGUS W.png') }}" width="16" height="16">RGUS AI</div>
+              Failed to contact ARGUS AI.
+            `;
+        }
+        messages.scrollTop = messages.scrollHeight;
+    });
+
+    // ── Restore on page load / navigation ────────────────────────────────────
+    refreshConversationList();
+    if (activeConversationId) {
+        loadConversation(activeConversationId);
+    }
+});
+
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

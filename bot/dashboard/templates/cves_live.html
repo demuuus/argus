@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}Live Search — Argus{% endblock %}
+{% block content %}
+
+<div class="page-title mb-4">Live NVD Search</div>
+<p><strong>*Requires internet connection</strong></p>
+
+<form method="GET">
+    <div class="input-group mb-3">
+        <input type="text" name="q" class="form-control" placeholder="Windows, CVE-2025-1234..." value="{{ keyword }}">
+        <button class="btn btn-primary">Search</button>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-4">
+        <select name="per_page" class="form-select form-select-sm" style="width:120px" onchange="this.form.submit()">
+            <option value="10" {% if per_page == 10 %}selected{% endif %}>10 Rows</option>
+            <option value="25" {% if per_page == 25 %}selected{% endif %}>25 Rows</option>
+            <option value="50" {% if per_page == 50 %}selected{% endif %}>50 Rows</option>
+            <option value="100" {% if per_page == 100 %}selected{% endif %}>100 Rows</option>
+        </select>
+    </div>
+</form>
+
+{% if error %}
+<div class="alert alert-warning">
+    {{ error }}
+</div>
+{% endif %}
+
+{% if note %}
+<div class="alert alert-info">
+    {{ note }}
+</div>
+{% endif %}
+
+{% if results or total %}
+<p class="text-muted mb-3">
+    {% if total %}
+        Showing {{ start_index + 1 }}&ndash;{{ start_index + results|length }} of {{ total }} result{{ 's' if total != 1 else '' }}
+    {% else %}
+        No results found.
+    {% endif %}
+</p>
+{% endif %}
+
+{% if results %}
+
+<div class="panel">
+    <div class="table-responsive cve-table">
+        <table class="table">
+<thead>
+    <tr>
+        <th>#</th>
+
+        <th>
+            <a
+                class="text-decoration-none"
+                href="?q={{ keyword }}&sort={{ 'cve_desc' if sort == 'cve_asc' else 'cve_asc' }}&per_page={{ per_page }}"
+            >
+                CVE
+
+                {% if sort == 'cve_asc' %}
+                    ↓
+                {% elif sort == 'cve_desc' %}
+                    ↑
+                {% endif %}
+
+            </a>
+        </th>
+
+        <th>
+            <a
+                class="text-decoration-none"
+                href="?q={{ keyword }}&sort={{ 'cvss_desc' if sort == 'cvss_asc' else 'cvss_asc' }}&per_page={{ per_page }}"
+            >
+                CVSS
+
+                {% if sort == 'cvss_asc' %}
+                    ↓
+                {% elif sort == 'cvss_desc' %}
+                    ↑
+                {% endif %}
+
+            </a>
+        </th>
+
+        <th>
+            Description
+        </th>
+
+    </tr>
+</thead>
+            <tbody>
+
+            {% for cve in results %}
+
+                <tr>
+                    <td class="text-muted">
+                        {{ start_index + loop.index }}
+                    </td>
+
+                    <td>
+                        <a href="/cve/live/{{ cve['id'] }}" class="text-decoration-none">{{ cve["id"] }}</a>
+                    </td>
+
+                    <td>
+                        {{ cve["cvss"] }}
+                    </td>
+
+                    <td>
+                        {{ cve["description"] }}
+                    </td>
+                </tr>
+
+            {% endfor %}
+
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endif %}
+
+<nav class="mt-4">
+
+<ul class="pagination">
+
+{% if page > 1 %}
+
+<li class="page-item">
+    <a class="page-link" href="?q={{ keyword }}&sort={{ sort }}&per_page={{ per_page }}&page={{ page - 1 }}">Previous</a>
+</li>
+
+{% endif %}
+
+<li class="page-item active">
+
+<span class="page-link">
+
+{{ page }} / {{ total_pages }}
+
+</span>
+
+</li>
+
+{% if page < total_pages %}
+
+<li class="page-item">
+
+<a
+class="page-link"
+href="?q={{ keyword }}&sort={{ sort }}&per_page={{ per_page }}&page={{ page + 1 }}"
+>
+Next
+</a>
+
+</li>
+
+{% endif %}
+
+</ul>
+
+</nav>
+
+{% endblock %}

@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Edit — Argus{% endblock %}
+{% block content %}
+
+<div class="mb-3">
+  <a href="/assets" class="text-muted" style="font-size:.85rem">
+    <i class="bi bi-chevron-left me-1"></i>Assets
+  </a>
+</div>
+<div class="page-title">Edit Asset #{{ asset[0] }}</div>
+
+<div class="panel p-4" style="max-width:600px">
+  <form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="row g-3 mb-3">
+      <div class="col-sm-6">
+        <label class="form-label">Vendor</label>
+        <input class="form-control" name="vendor" value="{{ asset[1] }}" required>
+      </div>
+      <div class="col-sm-6">
+        <label class="form-label">Product</label>
+        <input class="form-control" name="product" value="{{ asset[2] }}" required>
+      </div>
+    </div>
+    <div class="row g-3 mb-3">
+      <div class="col-sm-6">
+        <label class="form-label">Version</label>
+        <input class="form-control" name="version" value="{{ asset[3] }}" required>
+      </div>
+      <div class="col-sm-6">
+        <label class="form-label">Type</label>
+        <select class="form-select" name="type">
+          {% for t in valid_types %}
+          <option value="{{ t }}" {% if asset[9] == t %}selected{% endif %}>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="row g-3 mb-3">
+      <div class="col-sm-6">
+        <label class="form-label">Exposure</label>
+        <select class="form-select" name="exposure">
+          {% for e in valid_exposures %}
+          <option value="{{ e }}" {% if asset[12] == e %}selected{% endif %}>{{ e }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-sm-6">
+        <label class="form-label">
+          Function
+          <span class="text-muted" style="font-size:.72rem;font-weight:400">(network role)</span>
+        </label>
+        <select class="form-select" name="function">
+          <option value="" {% if not asset[13] %}selected{% endif %}>— Not specified —</option>
+          {% for f in valid_functions %}
+          <option value="{{ f }}" {% if asset[13] == f %}selected{% endif %}>{{ f }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="row g-3 mb-3">
+      <div class="col-sm-6">
+        <label class="form-label">Location</label>
+        <input class="form-control" name="location" value="{{ asset[4] or '' }}">
+      </div>
+      <div class="col-sm-6">
+        <label class="form-label">Owner</label>
+        <input class="form-control" name="owner" value="{{ asset[5] or '' }}">
+      </div>
+    </div>
+    <div class="row g-3 mb-3">
+      <div class="col-sm-6">
+        <label class="form-label">Priority</label>
+        <select class="form-select" name="priority">
+          <option value="">— Select —</option>
+          {% for p in ['Low','Medium','High','Critical'] %}
+          <option {% if asset[6] == p %}selected{% endif %}>{{ p }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-sm-6">
+        <label class="form-label">Search Keyword</label>
+        <input class="form-control" name="search_keyword" value="{{ asset[8] or '' }}">
+      </div>
+    </div>
+    <div class="row g-3 mb-3">
+      <div class="col-sm-6">
+        <label class="form-label">Country</label>
+        <select class="form-select" name="country_code" id="countrySelect">
+          <option value="">— Not specified —</option>
+          {% for code, info in supported_locations.items() %}
+          <option value="{{ code }}" {% if asset[11] == code %}selected{% endif %}>{{ info.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-sm-6">
+        <label class="form-label">
+          City
+          {% if not asset[10] %}<span class="text-muted" style="font-size:.72rem;font-weight:400">(Not specified)</span>{% endif %}
+        </label>
+        <select class="form-select" name="city" id="citySelect">
+          <option value="">— Select a country first —</option>
+        </select>
+      </div>
+    </div>
+    <div class="mb-4">
+      <label class="form-label">Notes</label>
+      <textarea class="form-control" name="notes" rows="3">{{ asset[7] or '' }}</textarea>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-primary">Save Changes</button>
+      <a href="/assets" class="btn btn-outline-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<script>
+const SUPPORTED_LOCATIONS = {{ supported_locations | tojson | safe }};
+const CURRENT_COUNTRY = {{ (asset[11] or "") | tojson | safe }};
+const CURRENT_CITY = {{ (asset[10] or "") | tojson | safe }};
+
+function populateCityDropdown(countryCode, selectedCity) {
+  const citySelect = document.getElementById("citySelect");
+  citySelect.innerHTML = "";
+
+  if (!countryCode || !SUPPORTED_LOCATIONS[countryCode]) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "— Select a country first —";
+    citySelect.appendChild(opt);
+    return;
+  }
+
+  const placeholderOpt = document.createElement("option");
+  placeholderOpt.value = "";
+  placeholderOpt.textContent = "— Select a city —";
+  citySelect.appendChild(placeholderOpt);
+
+  SUPPORTED_LOCATIONS[countryCode].cities.forEach((city) => {
+    const opt = document.createElement("option");
+    opt.value = city;
+    opt.textContent = city;
+    if (city === selectedCity) opt.selected = true;
+    citySelect.appendChild(opt);
+  });
+}
+
+document.getElementById("countrySelect").addEventListener("change", (e) => {
+  populateCityDropdown(e.target.value, null);
+});
+
+// Pre-fill on page load with the asset's existing city, if any (the
+// feature spec's own requirement: "existing city value selected
+// automatically when editing an asset").
+populateCityDropdown(CURRENT_COUNTRY, CURRENT_CITY);
+</script>
+{% endblock %}

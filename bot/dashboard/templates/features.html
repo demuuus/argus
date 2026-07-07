@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Features — Argus{% endblock %}
+{% block content %}
+
+<div class="container">
+    <div class="text-center py-5">
+        <h1 class="display-4 fw-bold">Features</h1>
+        <p class="lead text-muted">Vulnerability Intelligence Platform</p>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-md-6">
+            <div class="stat-card">
+                <h4>Asset Inventory</h4>
+                <p>
+                    Track software, devices,
+                    servers and applications.
+                </p>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="stat-card">
+                <h4>CVE Correlation</h4>
+                <p>
+                    Match assets against
+                    vulnerability databases.
+                </p>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="stat-card">
+                <h4>Risk Scoring</h4>
+                <p>
+                    Combines CVSS, KEV,
+                    asset criticality and future EPSS.
+                </p>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="stat-card">
+                <h4>Reporting</h4>
+                <p>
+                    Weekly and monthly PDF reports.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <hr class="my-5">
+    <h2 class="mb-4">Cybersecurity Concepts</h2>
+
+    <div class="row g-4">
+        <div class="col-md-3">
+            <div class="stat-card">
+                <h5>CVE</h5>
+                <p>Public vulnerability identifier.</p>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="stat-card">
+                <h5>CVSS</h5>
+                <p>Severity scoring system.</p>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="stat-card">
+                <h5>CWE</h5>
+                <p>Weakness classification.</p>
+            </div>
+        </div>
+
+        <div class="col-md-3">
+            <div class="stat-card">
+                <h5>KEV</h5>
+                <p>Known exploited vulnerabilities.</p>
+            </div>
+        </div>
+    </div>
+
+    <hr class="my-5">
+    <h2 class="mb-4">Architecture</h2>
+
+    <div class="panel p-4">
+        <pre>
+            Assets
+            │
+            ▼
+            ├── NVD API
+            │
+            ├── KEV
+            ├── EPSS
+            │
+            ▼
+            ├── Risk Engine
+            ▼
+            ├── Dashboard
+            ├── Reports
+            ├── Charts
+            ├── Telegram
+            └── AI
+        </pre>
+    </div>
+</div>
+
+{% endblock %}

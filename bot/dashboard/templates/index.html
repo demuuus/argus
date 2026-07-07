@@ -1,0 +1,466 @@
+{% extends "base.html" %}
+{% block title %}Security Overview — Argus{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <div class="page-title mb-0">Security Overview</div>
+  <form method="POST" action="/today" id="scanAllForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-primary" id="scanAllBtn" onclick="this.disabled=true; this.innerHTML='<span class=\'spinner-border spinner-border-sm me-2\' role=\'status\'></span>Scanning…'; this.form.submit();">
+      <i class="bi bi-arrow-repeat me-1"></i>Scan All Assets
+    </button>
+  </form>
+</div>
+
+{% if scan_summary %}
+<div class="panel mb-4 p-3" style="border-color:rgba(79,142,247,.35)">
+  <div class="d-flex align-items-center gap-2 mb-2">
+    <i class="bi bi-check-circle-fill" style="color:#4fcf8e"></i>
+    <span style="font-weight:600;font-size:.9rem">Last scan completed: {{ scan_summary.ts }}</span>
+    <span class="text-muted" style="font-size:.8rem">
+      — {{ scan_summary.assets }} assets, {{ scan_summary.cves }} CVEs total,
+      {{ scan_summary.new }} new findings{% if scan_summary.errors %},
+      <span style="color:#f75f5f">{{ scan_summary.errors }} errors</span>{% endif %}
+    </span>
+  </div>
+</div>
+{% endif %}
+
+<!-- Stat cards + Vulnerabilities panel -->
+<div class="row g-3 mb-4">
+  
+<!-- Assets summary -->
+  <div class="col-12 col-md-6 col-lg-2">
+    <a href="/assets" class="summary-card summary-card-assets h-100">
+      <div class="summary-card-header">
+        <div>
+          <div class="summary-card-eyebrow">
+            <i class="bi bi-hdd-stack"></i>
+            Asset management
+          </div>
+          <h2 class="summary-card-title">Assets</h2>
+        </div>
+
+        <i class="bi bi-arrow-up-right summary-card-link-icon"></i>
+      </div>
+
+      <div class="summary-card-body">
+        <div class="summary-card-value">{{ assets }}</div>
+        <div class="summary-card-description">
+          Managed systems and devices
+        </div>
+      </div>
+
+      <div class="summary-card-footer">
+        <span><i class="bi bi-boxes me-1"></i> View asset inventory</span>
+        <i class="bi bi-chevron-right"></i>
+      </div>
+    </a>
+  </div>
+
+<!-- Reports summary -->
+  <div class="col-12 col-md-6 col-lg-2">
+    <a href="/reports" class="summary-card summary-card-reports h-100">
+      <div class="summary-card-header">
+        <div>
+          <div class="summary-card-eyebrow">
+            <i class="bi bi-file-earmark-text"></i>Reporting center
+          </div>
+          <h2 class="summary-card-title">Reports</h2>
+        </div>
+        
+        <i class="bi bi-arrow-up-right summary-card-link-icon"></i>
+      </div>
+      
+      <div class="summary-card-body">
+        <div class="summary-card-value">{{ reports }}</div>
+        <div class="summary-card-description">Generated security reports</div>
+      </div>
+      
+      <div class="summary-card-footer">
+        <span><i class="bi bi-folder2-open me-1"></i> View all reports</span>
+        <i class="bi bi-chevron-right"></i>
+      </div>
+    </a>
+  </div>
+
+<!-- Vulnerabilities summary -->
+  <div class="col-12 col-lg-4">
+    <section class="vulnerability-summary h-100" aria-label="Vulnerability summary">
+      <div class="vulnerability-summary-header">
+        <div>
+          <div class="vulnerability-summary-eyebrow">
+            <i class="bi bi-shield-exclamation"></i>Security exposure
+          </div>
+          <h2 class="vulnerability-summary-title">Vulnerabilities</h2>
+        </div>
+        
+        <a href="/findings" class="vulnerability-summary-view">View findings<i class="bi bi-arrow-right"></i></a>
+      </div>
+      
+      <div class="vulnerability-metrics">
+        <a href="/findings" class="vulnerability-metric">
+          <span class="vulnerability-metric-icon metric-cve"><i class="bi bi-bug"></i></span>
+          <span class="vulnerability-metric-label">
+            <strong>CVEs</strong>
+            <small>Tracked vulnerabilities</small>
+          </span>
+          <span class="vulnerability-metric-value">{{ cves }}</span><i class="bi bi-chevron-right vulnerability-metric-arrow"></i>
+        </a>
+
+        <a href="/findings" class="vulnerability-metric">
+          <span class="vulnerability-metric-icon metric-findings">
+            <i class="bi bi-exclamation-triangle"></i>
+          </span>
+          <span class="vulnerability-metric-label">
+            <strong>Findings</strong>
+            <small>Asset vulnerability matches</small>
+          </span>
+          <span class="vulnerability-metric-value">{{ findings }}</span>
+          <i class="bi bi-chevron-right vulnerability-metric-arrow"></i>
+        </a>
+
+        <a href="/findings?kev=true" class="vulnerability-metric">
+          <span class="vulnerability-metric-icon metric-kev">
+            <i class="bi bi-lightning-charge"></i>
+          </span>
+          <span class="vulnerability-metric-label">
+            <strong>Known Exploited</strong>
+            <small>CISA KEV catalog matches</small>
+          </span>
+          <span class="vulnerability-metric-value">{{ kevs }}</span>
+          <i class="bi bi-chevron-right vulnerability-metric-arrow"></i>
+        </a>
+      </div>
+    </section>
+  </div>
+  
+<!-- Last scan summary -->
+  <div class="col-12 col-md-4 col-lg-4">
+    <section class="scan-summary-card h-100" aria-label="Last scan summary">
+      <div class="scan-summary-header">
+        <div class="scan-summary-eyebrow">
+          <i class="bi bi-clock-history"></i>Scan status
+        </div>
+        
+        {% if scan_summary %}
+        <span class="scan-status-badge scan-status-complete">
+          <i class="bi bi-check-circle-fill"></i>Complete
+        </span>
+        
+        {% else %}
+        <span class="scan-status-badge scan-status-none">
+          <i class="bi bi-dash-circle"></i>No scan
+        </span>
+        
+        {% endif %}
+      </div>
+      
+      {% if scan_summary %}
+      <div class="scan-summary-time">
+        {{ scan_summary.ts }}
+      </div>
+      
+      <div class="scan-summary-label">Last completed scan</div>
+      
+      <div class="scan-summary-metrics">
+        <div class="scan-summary-metric">
+          <strong>{{ scan_summary.assets }}</strong>
+          <span>Assets scanned</span>
+        </div>
+        
+        <div class="scan-summary-metric">
+          <strong>{{ scan_summary.cves }}</strong>
+          <span>CVEs found</span>
+        </div>
+        
+        <div class="scan-summary-metric {% if scan_summary.new > 0 %}scan-summary-new{% endif %}">
+          <strong>{{ scan_summary.new }}</strong>
+          <span>New findings</span>
+        </div>
+      </div>
+      
+      {% if scan_summary.errors %}
+      <div class="scan-summary-errors">
+        <i class="bi bi-exclamation-triangle-fill"></i>
+        
+        {{ scan_summary.errors }} scan error{{ '' if scan_summary.errors == 1 else 's' }}
+      </div>
+
+      {% if scan_summary.error_lines %}
+      <details style="margin-top:.5rem;font-size:.85rem;">
+        <summary style="cursor:pointer;color:#f75f5f;">Show error details</summary>
+        <ul style="margin:.4rem 0 0 0;padding-left:1.1rem;color:#c9c9c9;">
+          {% for line in scan_summary.error_lines %}
+          <li>{{ line }}</li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endif %}
+      
+      {% endif %}
+      
+      {% else %}
+      <div class="scan-summary-empty">
+        <i class="bi bi-arrow-repeat"></i>
+        <span>No completed scan recorded.</span>
+      </div>
+      {% endif %}
+    </section>
+  </div>
+</div>
+
+<!-- City Exposure Overview -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="panel-header mb-3"><i class="bi bi-geo-alt me-2"></i>City Exposure Overview</div>
+  </div>
+
+  <!-- Summary indicators -->
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="label">Cities Monitored</div>
+      <div class="value">{{ cities_monitored }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="label">Assets With City</div>
+      <div class="value">{{ assets_with_city }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="label">Unassigned Assets</div>
+      <div class="value">{{ unassigned_asset_count }}</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="stat-card">
+      <div class="label">Cities With KEV</div>
+      <div class="value" style="{% if cities_with_kev > 0 %}color:#f75f5f{% endif %}">{{ cities_with_kev }}</div>
+    </div>
+  </div>
+
+  {% if city_exposure %}
+  <!-- Map -->
+  <div class="col-lg-7" style="min-width:0">
+    <div class="panel" style="height:100%">
+      <div class="panel-header"><i class="bi bi-map me-2"></i>Exposure Map</div>
+      <div id="city-map" style="height:420px; min-width:0; border-radius:0 0 10px 10px;"
+           data-cities='{{ city_exposure | tojson | safe }}'>
+      </div>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="col-lg-5" style="min-width:0">
+    <div class="panel" style="height:100%; overflow-x:auto">
+      <div class="panel-header"><i class="bi bi-table me-2"></i>Exposure by City</div>
+      <table class="table table-sm mb-0" style="min-width:560px">
+        <thead>
+          <tr>
+            <th>City</th>
+            <th>Assets</th>
+            <th>Findings</th>
+            <th>CVEs</th>
+            <th>KEVs</th>
+            <th>Risk</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in city_exposure %}
+          <tr>
+            <td style="max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title="{{ c.city }}, {{ c.country_code }}">
+              {{ c.city }}
+              <span class="text-muted" style="font-size:.75rem">({{ c.country_code }})</span>
+              {% if not c.mapped %}
+              <span class="text-muted" style="font-size:.7rem" title="Unmapped: city is included in the table but has no map centroid configured.">
+                <i class="bi bi-question-circle"></i>
+              </span>
+              {% endif %}
+            </td>
+            <td>{{ c.asset_count }}</td>
+            <td>{{ c.finding_count }}</td>
+            <td>{{ c.unique_cve_count }}</td>
+            <td>
+              {% if c.kev_count > 0 %}
+              <span class="badge-kev">{{ c.kev_count }}</span>
+              {% else %}
+              <span class="text-muted">0</span>
+              {% endif %}
+            </td>
+            <td>
+              <span class="badge" style="background:{{ c.risk_color }}22; color:{{ c.risk_color }}; font-weight:600">
+                {{ c.risk_level }}
+              </span>
+            </td>
+            <td style="white-space:nowrap">
+              <a href="{{ c.assets_url }}" class="btn btn-sm btn-outline-secondary" title="View Assets"><i class="bi bi-hdd-stack"></i></a>
+              <a href="{{ c.findings_url }}" class="btn btn-sm btn-outline-secondary" title="View Findings"><i class="bi bi-bug"></i></a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if unmapped_city_count > 0 %}
+      <div class="text-muted p-2" style="font-size:.75rem; border-top:1px solid var(--argus-border)">
+        <i class="bi bi-info-circle me-1"></i>
+        {{ unmapped_city_count }} {{ 'city' if unmapped_city_count == 1 else 'cities' }} unmapped:
+        included in the table above but no map centroid is configured yet.
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="col-12">
+    <div class="panel p-4 text-center text-muted">
+      <i class="bi bi-geo-alt" style="font-size:1.5rem"></i>
+      <p class="mb-0 mt-2">No assets have a city assigned yet. Add or edit an asset to set its city.</p>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Findings history chart -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <div class="chart-box">
+      <div class="panel-header mb-3"><i class="bi bi-graph-up me-2"></i>Findings Discovery History</div>
+      <div style="height:260px;position:relative">
+        <canvas id="chartHistory"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Tables row -->
+<div class="row g-3 mb-4">
+  <div class="col-lg-6" style="min-width: 0;">
+    <div class="panel h-100 dashboard-table-panel">
+      <div class="panel-header"><i class="bi bi-clock-history me-2"></i>Recent Findings</div>
+      <table class="table">
+        <thead><tr><th>CVE</th><th>Asset</th><th>Risk</th></tr></thead>
+        <tbody>
+          {% for f in recent_findings %}
+          {# f: (cve_id, risk_score, asset_name) #}
+          <tr>
+            <td><a href="/finding/{{ f[0] }}">{{ f[0] }}</a></td>
+            <td><span class="text-muted" style="font-size:.8rem">{{ f[2] or '—' }}</span></td>
+            <td class="{% if f[1] > 175 %}risk-high{% elif f[1] > 125 %}risk-med{% else %}risk-low{% endif %}">{{ f[1] }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3" class="text-muted text-center py-3">No findings yet</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="col-lg-6" style="min-width: 0;">
+    <div class="panel h-100 dashboard-table-panel">
+      <div class="panel-header"><i class="bi bi-exclamation-triangle me-2"></i>Top 5 Risks</div>
+      <table class="table">
+        <thead><tr><th>CVE</th><th>Asset</th><th>Max Risk</th></tr></thead>
+        <tbody>
+          {% for r in top_risks %}
+          {# r: (cve_id, max_risk, asset_name) #}
+          <tr>
+            <td><a href="/finding/{{ r[0] }}">{{ r[0] }}</a></td>
+            <td><span class="text-muted" style="font-size:.8rem">{{ r[2] or '—' }}</span></td>
+            <td class="{% if r[1] > 175 %}risk-high{% elif r[1] > 125 %}risk-med{% else %}risk-low{% endif %}">{{ r[1] }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="3" class="text-muted text-center py-3">No data</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="panel">
+      <div class="panel-header"><i class="bi bi-file-earmark-text me-2"></i>Recent Reports</div>
+      <table class="table">
+        <thead><tr><th>ID</th><th>Type</th><th>Generated</th><th></th></tr></thead>
+        <tbody>
+          {% for r in recent_reports %}
+          <tr>
+            <td>{{ r[0] }}</td>
+            <td><span class="badge-safe">{{ r[1] }}</span></td>
+            <td class="text-muted" style="font-size:.8rem">{{ r[2].strftime('%Y-%m-%d') if r[2] else '—' }}</td>
+            <td><a href="/download/{{ r[0] }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-download"></i></a></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="text-muted text-center py-3">No reports generated</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="panel">
+      <div class="panel-header"><i class="bi bi-shield-exclamation me-2"></i>Latest KEVs</div>
+      <table class="table">
+        <thead><tr><th>CVE ID</th><th>CVSS</th></tr></thead>
+        <tbody>
+          {% for k in latest_kevs %}
+          <tr>
+            <td><a href="/finding/{{ k[0] }}">{{ k[0] }}</a> <span class="badge-kev ms-1">KEV</span></td>
+            <td>{{ k[1] }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="2" class="text-muted text-center py-3">No KEVs found</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="{{ url_for('static', filename='js/city_map.js') }}"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    fetch("/api/chart/findings_history")
+    .then(r => r.json())
+    .then(data => {
+        const ctx = document.getElementById("chartHistory");
+        if (!ctx) return;
+        new Chart(ctx, {
+            type: "line",
+            data: {
+                labels: data.labels,
+                datasets: [{
+                    label: "New Findings",
+                    data: data.values,
+                    borderColor: "#4f8ef7",
+                    backgroundColor: "rgba(79,142,247,.12)",
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 3,
+                    borderWidth: 2,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { ticks: { color: "#8892a4", font: { size: 10 } }, grid: { color: "rgba(255,255,255,0.05)" } },
+                    y: { ticks: { color: "#8892a4", font: { size: 10 } }, grid: { color: "rgba(255,255,255,0.05)" }, beginAtZero: true }
+                }
+            }
+        });
+    })
+    .catch(console.error);
+});
+</script>
+{% endblock %}

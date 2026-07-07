@@ -1,0 +1,308 @@
+{% extends "base.html" %}
+{% block title %}Basics — Argus{% endblock %}
+{% block content %}
+
+<div class="container">
+    <div class="text-center py-5">
+        <h1 class="display-4 fw-bold">Cybersecurity Basics</h1>
+        <p class="lead text-muted">Core concepts used throughout ARGUS</p>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-md-6">
+            <div class="stat-card">
+                <h3>CVE</h3>
+                <p><a href="https://www.cve.org/">Common Vulnerabilities and Exposures</a>.
+                    A unique identifier assigned to a publicly disclosed security vulnerability. 
+                    Each CVE represents a specific security flaw that affects software, hardware, 
+                    firmware, operating systems, network devices, cloud services, or applications.
+                </p>
+
+                <p><strong>Example</strong></p>
+                    <ul>
+                        <li><a href="https://www.cve.org/CVERecord?id=CVE-2024-4115">CVE-2024-4115</a></li>
+                        <li><a href="https://www.cve.org/CVERecord?id=CVE-2025-12345">CVE-2025-12345</a></li>
+                    </ul>
+                    <p>Each identifier refers to one specific vulnerability.</p>
+                <p><strong>Purpose</strong><br>CVEs provide a standardized naming system that allows security teams, vendors,
+                    researchers, and tools to reference the same vulnerability consistently.
+                </p>
+
+                <p><strong>Without CVEs</strong></p>
+                    <ul>
+                        <li>Vendor A: "Authentication Bypass Bug"</li>
+                        <li>Vendor B: "Remote Acess Vulnerability"</li>
+                        <li>Researcher: "Router Login Flaw"</li>
+                    </ul>
+                <p><strong>With CVEs</strong><br></p>
+                    <ul>
+                        <li><a href="https://www.cve.org/CVERecord?id=CVE-2024-4115">CVE-2024-4115</a></li>
+                    </ul>
+                    <p>Everyone references the same vulnerability.</p>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="stat-card">
+                <h3>CVSS</h3>
+                <p><a href="https://www.first.org/cvss/">Common Vulnerability Scoring System</a>.
+                    Measures the technical severity of a vulnerability on a scale from 0.0 to 10.0.
+                </p>
+                <ul>
+                    <li>None: 0.0</li>
+                    <li>Low: 0.1 - 3.9</li>
+                    <li>Medium: 4.0 - 6.9</li>
+                    <li>High: 7.0 - 8.9</li>
+                    <li>Critical: 9.0 - 10.0</li>
+                </ul>
+                <p><strong>Example:</strong><br>
+                    CVSS evaluates factors such as:</p>
+                    <ul>
+                        <li>Attack complexity</li>
+                        <li>Required privileges</li>
+                        <li>User interaction</li>
+                        <li>Impact on confidentiality</li>
+                        <li>Impact on integrity</li>
+                        <li>Impact on availability</li>
+                    </ul>
+                <p><strong>Limitations</strong><br>
+                    CVSS only measures technical severity. It does <strong>not</strong> indicate:</p>
+                    <ul>
+                        <li>Whether attackers are exploiting it</li>
+                        <li>Whether exploit code exists</li>
+                        <li>Whether your organization is affected</li>
+                    </ul>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="stat-card">
+                <h3>CWE</h3>
+                <p>
+                    <a href="https://cwe.mitre.org/index.html">Common Weakness Enumeration</a>.
+                    Describes the root cause of a vulnerability. While CVE identifies
+                    <strong>a specific vulnerability</strong>, CWE identifies
+                    <strong>the category of weakness</strong>.
+                </p>
+                <p>
+                    <strong>Example:</strong><br>
+                    <strong>Vulnerability</strong></p>
+                    <ul>
+                        <li><strong><a href="https://www.cve.org/CVERecord?id=CVE-2024-4115">CVE-2024-4115</a></strong></li>
+                    </ul>
+                    <p><strong>Underlying Weakness</strong></p>
+                    <ul>
+                        <li><strong><a href="https://cwe.mitre.org/data/definitions/79.html">CWE-79</a></strong></li>
+                    </ul>Cross-Site Scripting (XSS).
+                <p><strong>Why CWE Matters</strong><br>
+                    CWE helps organizations identify recurring security weaknesses.
+                </p>
+                <p><strong>Example:</strong><br>
+                    50 vulnerabilities, 40 of them are <strong>CWE-79</strong><br>
+                    This indicates a systemic XSS problem rather than isolated issues.
+                </p>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="stat-card">
+                <h3>KEV</h3>
+                <p><a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog">Known Exploited Vulnerabilities</a>.
+                    A catalog maintained by the <a href="https://www.cisa.gov/">Cybersecurity and Infrastructure Security Agency</a>
+                    (CISA) containing vulnerabilities that are confirmed to be actively exploited in real-world attacks.
+                </p>
+                <p><strong>Why KEV Matters</strong><br>
+                    Many vulnerabilities have:</p>
+                    <ul>
+                        <li>High CVSS</li>
+                        <li>No exploitation</li>
+                    </ul>
+                    <p>However, KEV vulnerabilities have:</p>
+                    <ul>
+                        <li>Real attackers</li>
+                        <li>Real incidents</li>
+                        <li>Real exploitation</li>
+                    </ul>
+                <p><strong>Example</strong><br>
+                    <a href="https://www.cve.org/CVERecord?id=CVE-2021-44228">CVE-2021-44228</a> (Log4Shell)<br>
+                    CVSS: 10.0<br>
+                    KEV: Yes
+                </p>
+                <p><strong>Risk Implications</strong><br>
+                    If a vulnerability appears in KEV:</p>
+                    <ul>
+                        <li>Exploit exists</li>
+                        <li>Attackers are using it</li>
+                        <li>Immediate remediation recommended</li>
+                    </ul>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="stat-card">
+                <h3>EPSS</h3>
+                <p><a href="https://www.first.org/epss/">Exploit Prediction Scoring System</a>. 
+                    Estimates the probability that a vulnerability will be exploited in the next 30 days. 
+                    Developed by the <a href="https://www.first.org/">Forum of Incident Response and Security Teams</a> 
+                    (FIRST), EPSS uses machine learning and real-world threat intelligence to predict exploitation 
+                    likelihood on a scale from 0.0 to 1.0.
+                </p>
+                <p><strong>Score</strong><br>
+                    Example:<br>
+                    EPSS = 0.95<br>
+                    Means a very high likelihood of exploitation.
+                </p>
+                <p><strong>Percentile</strong><br>
+                    Example:</p>
+                    <table class="table-sm w-100">
+                        <tr>
+                            <th>EPSS</th>
+                            <th>0.56%</th>
+                        </tr>
+                        <tr>
+                            <th>Percentile</th>
+                            <th>P99.8</th>
+                        </tr>
+                    </table>
+                   <p>Means a higher exploitation probability than 99.8% of all tracked vulnerabilities
+                    and among the vulnerability most likely to be exploited.</p>
+                <p><strong>Why EPSS Matters</strong><br>
+                    CVSS asks: How severe is the vulnerability<br>
+                    EPSS asks: How likely is exploitation<br>
+                </p>
+                <p><strong>Example</strong><br></p>
+                    <table class="table-sm w-100">
+                        <tr>
+                            <th>CVE</th>
+                            <th>CVSS</th>
+                            <th>EPSS</th>
+                        </tr>
+                        <tr>
+                            <th>CVE-A</th>
+                            <th>9.8</th>
+                            <th>0.01%</th>
+                        </tr>
+                        <tr>
+                            <th>CVE-B</th>
+                            <th>6.5</th>
+                            <th>2.50%</th>
+                        </tr>
+                    </table>
+                    <p>Although CVE-A is technically more severe, CVE-B may be more likely to be attacked.</p>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="stat-card">
+                <h3>ARGUS Risk Score</h3>
+                <p>
+                    ARGUS Risk Score is a custom prioritization metric designed to help
+                    security teams focus on vulnerabilities that pose the greatest risk
+                    to their environment.
+                </p>
+                <p>
+                    Unlike CVSS, which measures only technical severity, ARGUS combines
+                    multiple risk factors to better reflect real-world exposure and
+                    business impact.
+                </p>
+
+                <table class="table-sm w-100">
+                    <thead>
+                        <tr>
+                            <th>Factor</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>CVSS</td>
+                            <td>Technical severity of the vulnerability.</td>
+                        </tr>
+                        <tr>
+                            <td>KEV</td>
+                            <td>Additional weight if active exploitation has been confirmed by CISA</a>.</td>
+                        </tr>
+                        <tr>
+                            <td>Asset Priority</td>
+                            <td>Business importance of the affected asset.</td>
+                        </tr>
+                        <tr>
+                            <td>EPSS</td>
+                            <td>Likelihood of exploitation in the next 30 days.</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <p><strong>Example</strong></p>
+                <table class="table-sm w-100">
+                    <thead>
+                        <tr>
+                            <th>Metric</th>
+                            <th>Value</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>CVSS</td>
+                            <td>9.8</td>
+                        </tr>
+                        <tr>
+                            <td>KEV</td>
+                            <td>Yes</td>
+                        </tr>
+                        <tr>
+                            <td>Priority</td>
+                            <td>Critical</td>
+                        </tr>
+                        <tr>
+                            <td>EPSS</td>
+                            <td>99.8%</td>
+                        </tr>
+                        <tr>
+                            <td>ARGUS Risk Score</td>
+                            <td>1174</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p>
+                    Higher Risk Scores indicate vulnerabilities that should be prioritized for investigation
+                    and remediation.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-5">
+        <div class="panel p-4">
+            <h2>
+                Vulnerability Lifecycle
+            </h2>
+<pre>
+Discovery
+    │
+    ▼
+CVE Published
+    │
+    ▼
+CVSS Assigned
+    │
+    ▼
+EPSS Prediction
+    │
+    ▼
+KEV Exploitation
+    │
+    ▼
+ARGUS Detection
+    │
+    ▼
+Remediation
+</pre>
+
+        </div>
+
+    </div>
+
+</div>
+
+{% endblock %}

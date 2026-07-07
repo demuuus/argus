@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% from "_macros.html" import date_field, pagination_bar %}
+{% block title %}Patch Plan — Argus{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center gap-3 mb-4">
+  <div class="page-title mb-0">Patch Plan</div>
+  <span class="text-muted" style="font-size:.82rem">
+    {{ sched_total }} scheduled · {{ unsched_total }} unscheduled
+  </span>
+</div>
+
+{% macro risk_class(score) %}{% if score > 175 %}risk-high{% elif score > 125 %}risk-med{% else %}risk-low{% endif %}{% endmacro %}
+
+<div class="panel mb-4">
+  <div class="panel-header">
+    <i class="bi bi-calendar-check me-2"></i>Scheduled Patches
+    <span class="text-muted" style="font-size:.75rem;font-weight:400">— soonest first</span>
+  </div>
+  <table class="table mb-0">
+    <thead>
+      <tr>
+        <th>Planned Date</th>
+        <th>CVE</th>
+        <th>Asset</th>
+        <th>Exposure</th>
+        <th>Function</th>
+        <th>Risk</th>
+        <th>Status</th>
+        <th>Due Date</th>
+        <th>Assigned To</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in scheduled %}
+      <tr>
+        <td>
+          <form method="POST" action="/finding/update_patch_plan" class="d-flex align-items-center gap-1">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="asset_id" value="{{ f.asset_id }}">
+            <input type="hidden" name="cve_id"   value="{{ f.cve_id }}">
+            <input type="hidden" name="ref"       value="patch_plan">
+            {{ date_field(name="planned_patch_date", value=f.planned_patch_date, autosubmit=true) }}
+          </form>
+          {% if f.status not in ['Resolved','Accepted Risk','False Positive'] and f.planned_patch_date < today %}
+          <span class="text-danger" style="font-size:.7rem">overdue</span>
+          {% endif %}
+        </td>
+        <td><a href="/finding/{{ f.cve_id }}?ref=patch_plan">{{ f.cve_id }}</a></td>
+        <td><a href="/asset/{{ f.asset_id }}?ref=patch_plan">{{ f.vendor }} {{ f.product }}</a></td>
+        <td>
+          {% if f.exposure == 'External' %}<span style="color:#f75f5f;font-weight:600">External</span>
+          {% else %}<span class="text-muted">Internal</span>{% endif %}
+        </td>
+        <td>{{ f.function or '—' }}</td>
+        <td class="{{ risk_class(f.risk_score or 0) }}">
+          {{ f.risk_score or 0 }}
+          {% if f.kev %}<span class="badge-kev ms-1">⚠</span>{% endif %}
+        </td>
+        <td>{{ f.status }}</td>
+        <td>
+          {% if f.due_date %}
+            <span class="{% if f.status not in ['Resolved','Accepted Risk','False Positive'] and f.due_date < today %}text-danger fw-bold{% endif %}">
+              {{ f.due_date.strftime('%Y-%m-%d') }}
+            </span>
+          {% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+        <td>{{ f.assigned_to or '—' }}</td>
+        <td style="max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{{ f.patch_notes or '' }}">
+          {{ f.patch_notes or '—' }}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="10" class="text-muted text-center py-4">No patches currently scheduled.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {{ pagination_bar(
+       base_url="/patch_plan", prefix="sched",
+       page=sched_page, per_page=sched_per_page,
+       total=sched_total, total_pages=sched_total_pages,
+       preserve_qs="unsched_page=" ~ unsched_page ~ "&unsched_per_page=" ~ unsched_per_page
+     ) }}
+</div>
+
+<div class="panel">
+  <div class="panel-header">
+    <i class="bi bi-calendar-x me-2"></i>Unscheduled Open Findings
+    <span class="text-muted" style="font-size:.75rem;font-weight:400">— highest risk first, needs a patch date</span>
+  </div>
+  <table class="table mb-0">
+    <thead>
+      <tr>
+        <th>CVE</th>
+        <th>Asset</th>
+        <th>Exposure</th>
+        <th>Function</th>
+        <th>Risk</th>
+        <th>Status</th>
+        <th>Due Date</th>
+        <th>Set Planned Date</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in unscheduled %}
+      <tr>
+        <td><a href="/finding/{{ f.cve_id }}?ref=patch_plan">{{ f.cve_id }}</a></td>
+        <td><a href="/asset/{{ f.asset_id }}?ref=patch_plan">{{ f.vendor }} {{ f.product }}</a></td>
+        <td>
+          {% if f.exposure == 'External' %}<span style="color:#f75f5f;font-weight:600">External</span>
+          {% else %}<span class="text-muted">Internal</span>{% endif %}
+        </td>
+        <td>{{ f.function or '—' }}</td>
+        <td class="{{ risk_class(f.risk_score or 0) }}">
+          {{ f.risk_score or 0 }}
+          {% if f.kev %}<span class="badge-kev ms-1">⚠</span>{% endif %}
+        </td>
+        <td>{{ f.status }}</td>
+        <td>
+          {% if f.due_date %}
+            <span class="{% if f.due_date < today %}text-danger fw-bold{% endif %}">
+              {{ f.due_date.strftime('%Y-%m-%d') }}
+            </span>
+          {% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+        <td>
+          <form method="POST" action="/finding/update_patch_plan" class="d-flex align-items-center gap-1">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="asset_id" value="{{ f.asset_id }}">
+            <input type="hidden" name="cve_id"   value="{{ f.cve_id }}">
+            <input type="hidden" name="ref"       value="patch_plan">
+            {{ date_field(name="planned_patch_date", value=None, autosubmit=true) }}
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="text-muted text-center py-4">Nothing unscheduled — every open finding has a planned patch date.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {{ pagination_bar(
+       base_url="/patch_plan", prefix="unsched",
+       page=unsched_page, per_page=unsched_per_page,
+       total=unsched_total, total_pages=unsched_total_pages,
+       preserve_qs="sched_page=" ~ sched_page ~ "&sched_per_page=" ~ sched_per_page
+     ) }}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/date_input.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="landing-full-width">
+    <section class="landing-hero">
+        <div class="landing-hero-overlay"></div>
+        <div class="landing-hero-bottom-fade"></div>
+        
+        <div class="landing-hero-content text-center">
+            <h1 class="display-2 fw-bold mb-3">
+                <img id="argusLandingLogo" class="argus-logo-image argus-landing-logo" src="{{ url_for('static', filename='assets/ARGUS LOGO W.png') }}"
+                data-dark-logo="{{ url_for('static', filename='assets/ARGUS LOGO W.png') }}"
+                data-light-logo="{{ url_for('static', filename='assets/ARGUS LOGO B.png') }}"
+                alt="ARGUS">
+            </h1>
+            
+            <p class="landing-hero-subtitle">Asset Risk &amp; Global Underlay Security</p>
+            
+            <div class="mt-4">
+                <a href="/dashboard" class="argus-dashboard-btn">Dashboard</a>
+            </div>
+        </div>
+    </section>
+</div>
+
+<section class="landing-quote-section">
+    <blockquote class="landing-quote">
+        “The greatest victory is that which requires no battle.”
+        <footer>— Sun Tzu</footer>
+    </blockquote>
+</section>
+
+<div class="row g-4 mt-5">
+    <div class="col-md-3">
+        <div class="stat-card">
+            <h4>CVE</h4>
+            <p>Publicly disclosed vulnerabilities.</p>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="stat-card">
+            <h4>CVSS</h4>
+            <p>Severity scoring from 0-10.</p>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="stat-card">
+            <h4>CWE</h4>
+            <p>Root cause weakness categories.</p>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="stat-card">
+            <h4>KEV</h4>
+            <p>Known exploited vulnerabilities.</p>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mt-3">
+    <div class="col-md-4">
+        <div class="stat-card">
+            <h4>Asset Inventory</h4>
+            <p>Track servers, endpoints, applications and devices.</p>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="stat-card">
+            <h4>Risk Analysis</h4>
+            <p>Prioritize vulnerabilities using CVSS, KEV and risk scoring.</p>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="stat-card">
+            <h4>Reporting</h4>
+            <p>Generate weekly and monthly PDF reports.</p>
+        </div>
+    </div>
+</div>
+</pre>
+{% endblock %}

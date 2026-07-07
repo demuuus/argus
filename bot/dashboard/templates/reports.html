@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Reports — Argus{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <div class="page-title mb-0">Reports</div>
+  <div class="d-flex gap-2 flex-wrap">
+    {% for rtype, label, icon in [
+      ('day',   'Daily',   'bi-calendar-day'),
+      ('week',  'Weekly',  'bi-calendar-week'),
+      ('month', 'Monthly', 'bi-calendar-month'),
+      ('year',  'Yearly',  'bi-calendar'),
+    ] %}
+    <form method="POST" action="/generate_report/{{ rtype }}" style="display:inline" class="report-gen-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-outline-secondary btn-sm">
+        <i class="bi {{ icon }} me-1"></i>{{ label }}
+      </button>
+    </form>
+    {% endfor %}
+  </div>
+</div>
+
+{% if report_error %}
+<div class="alert alert-danger d-flex align-items-center gap-2 mb-3" role="alert">
+  <i class="bi bi-exclamation-triangle-fill"></i>
+  <div>{{ report_error }}</div>
+</div>
+{% endif %}
+
+{% if report_success %}
+<div class="alert alert-success d-flex align-items-center gap-2 mb-3" role="alert">
+  <i class="bi bi-check-circle-fill"></i>
+  <div>{{ report_success }}</div>
+</div>
+{% endif %}
+
+<div class="panel">
+  <table class="table">
+    <thead>
+      <tr><th>ID</th><th>Type</th><th>Generated</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for r in reports %}
+      <tr>
+        <td>{{ r.id }}</td>
+        <td><span class="badge-safe">{{ r.report_type }}</span></td>
+        <td class="text-muted" style="font-size:0.85rem">
+          {{ r.generated_at.strftime('%Y-%m-%d %H:%M') if r.generated_at else '—' }}
+        </td>
+        <td>
+          <a href="{{ url_for('download_report', report_id=r.id) }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-download me-1"></i>Download
+          </a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="text-muted text-center py-4">No reports generated yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+// Disable the submit button and show a spinner WITHOUT blocking the native
+// form submission. Disabling a submit button synchronously inside its own
+// click handler is unreliable across browsers and can cancel the submit
+// event entirely. Listening on the form's "submit" event (which fires only
+// after the browser has committed to submitting) and deferring the disable
+// to the next tick avoids that race condition.
+document.querySelectorAll(".report-gen-form").forEach(function (form) {
+  form.addEventListener("submit", function () {
+    var btn = form.querySelector("button[type=submit]");
+    if (!btn) return;
+    setTimeout(function () {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>Generating…';
+    }, 0);
+  });
+});
+</script>
+
+{% endblock %}

@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% from "_macros.html" import date_field %}
+{% block title %}Details — Argus{% endblock %}
+{% block content %}
+
+<div class="mb-3">
+  <a href="{{ back_url }}" class="text-muted" style="font-size:.85rem">
+    <i class="bi bi-chevron-left me-1"></i>
+    {% if ref == 'charts' %}Charts{% else %}Assets{% endif %}
+  </a>
+</div>
+<div class="page-title">{{ asset[1] }} {{ asset[2] }}</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="panel">
+      <div class="panel-header">Asset Info</div>
+      <table class="table table-sm mb-0">
+        <tr><td class="text-muted" style="width:35%">ID</td>      <td>{{ asset[0] }}</td></tr>
+        <tr><td class="text-muted">Version</td>   <td>{{ asset[3] or '—' }}</td></tr>
+        <tr><td class="text-muted">Location</td>  <td>{{ asset[4] or '—' }}</td></tr>
+        <tr><td class="text-muted">Owner</td>     <td>{{ asset[5] or '—' }}</td></tr>
+        <tr><td class="text-muted">Priority</td>  <td>{{ asset[6] or '—' }}</td></tr>
+        <tr>
+          <td class="text-muted">Exposure</td>
+          <td>
+            {% if asset[8] == 'External' %}<span style="color:#f75f5f;font-weight:600">External</span>
+            {% else %}<span class="text-muted">Internal</span>{% endif %}
+          </td>
+        </tr>
+        <tr><td class="text-muted">Function</td>  <td>{{ asset[9] or '—' }}</td></tr>
+        <tr><td class="text-muted">Notes</td>     <td>{{ asset[7] or '—' }}</td></tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="panel mb-4 p-3">
+  <form method="GET" class="d-flex align-items-center gap-3 flex-wrap">
+    <input type="hidden" name="ref" value="{{ ref }}">
+    <div class="d-flex align-items-center gap-2">
+      <label class="form-label mb-0">Sort findings by</label>
+      <select name="sort" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+        {% for val, label in [('risk_desc','Risk ↓'),('risk_asc','Risk ↑'),('cvss_desc','CVSS ↓'),('cvss_asc','CVSS ↑'),('cve_asc','CVE A→Z'),('cve_desc','CVE Z→A')] %}
+        <option value="{{ val }}" {% if sort == val %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+</div>
+
+{#
+  findings row indices (13 columns):
+  [0]  cve_id
+  [1]  cvss
+  [2]  kev
+  [3]  risk_score
+  [4]  epss
+  [5]  epss_percentile
+  [6]  patched
+  [7]  status
+  [8]  due_date
+  [9]  assigned_to
+  [10] assigned_team
+  [11] planned_patch_date
+  [12] patch_notes
+#}
+<div class="panel">
+  <div class="panel-header">Findings</div>
+  <table class="table">
+    <thead>
+      <tr>
+        <th>No.</th>
+        <th>CVE</th>
+        <th>CVSS</th>
+        <th>KEV</th>
+        <th>Risk</th>
+        <th>EPSS</th>
+        <th>Status</th>
+        <th>Due Date</th>
+        <th>Planned Patch</th>
+        <th>Assigned To</th>
+        <th>Patched</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in findings %}
+      <tr class="{% if f[6] %}opacity-50{% endif %}">
+        <td>{{ loop.index }}</td>
+        <td><a href="/finding/{{ f[0] }}?ref={{ ref }}">{{ f[0] }}</a></td>
+        <td>{{ f[1] }}</td>
+        <td>{% if f[2] %}<span class="badge-kev">⚠ KEV</span>{% else %}<span class="badge-safe">—</span>{% endif %}</td>
+        <td class="{% if f[3] > 175 %}risk-high{% elif f[3] > 125 %}risk-med{% else %}risk-low{% endif %}">{{ f[3] }}</td>
+        <td>{{ "%.2f"|format((f[4] or 0) * 100) }}%</td>
+        <td>
+          <form method="POST" action="/finding/update_status">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="asset_id" value="{{ asset[0] }}">
+            <input type="hidden" name="cve_id"   value="{{ f[0] }}">
+            <input type="hidden" name="ref"       value="asset">
+            <select name="status" class="form-select form-select-sm"
+                    onchange="this.form.submit()" style="min-width:120px">
+              {% for s in ['Open','In Progress','Resolved','Accepted Risk','False Positive'] %}
+              <option value="{{ s }}" {% if f[7] == s %}selected{% endif %}>{{ s }}</option>
+              {% endfor %}
+            </select>
+          </form>
+        </td>
+        <td>
+          {% if f[8] %}
+            <span class="{% if f[7] not in ['Resolved','Accepted Risk','False Positive'] and f[8] < today %}text-danger fw-bold{% endif %}">
+              {{ f[8].strftime('%Y-%m-%d') }}
+            </span>
+          {% else %}
+            <span class="text-muted">—</span>
+          {% endif %}
+        </td>
+        <td>
+          <form method="POST" action="/finding/update_patch_plan" class="d-flex align-items-center gap-1">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="asset_id" value="{{ asset[0] }}">
+            <input type="hidden" name="cve_id"   value="{{ f[0] }}">
+            <input type="hidden" name="ref"       value="asset">
+            {{ date_field(name="planned_patch_date", value=f[11], autosubmit=true) }}
+            {% if f[12] %}
+            <i class="bi bi-sticky-fill text-muted" style="font-size:.8rem" title="{{ f[12] }}"></i>
+            {% endif %}
+          </form>
+        </td>
+        <td>{{ f[9] or '—' }}</td>
+        <td>
+          <form method="POST" action="/toggle_patched/{{ asset[0] }}/{{ f[0] }}" style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="ref" value="asset">
+            <button type="submit"
+                    class="btn btn-sm {% if f[6] %}btn-success{% else %}btn-outline-secondary{% endif %}"
+                    style="font-size:.7rem;padding:.15rem .4rem"
+                    title="{% if f[6] %}Mark as not patched{% else %}Mark as patched{% endif %}">
+              {% if f[6] %}✓ Patched{% else %}Patch?{% endif %}
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="11" class="text-muted text-center py-4">No findings for this asset.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/date_input.js') }}"></script>
+{% endblock %}

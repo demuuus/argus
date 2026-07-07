@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Profile — Argus{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center gap-2 mb-4">
+  <a href="/dashboard" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-chevron-left me-1"></i>Dashboard
+  </a>
+  <div class="page-title mb-0">My Profile</div>
+</div>
+
+{% if success %}
+<div class="alert d-flex align-items-center gap-2 mb-4"
+     style="background:rgba(79,207,142,.12);border:1px solid rgba(79,207,142,.3);color:#4fcf8e;border-radius:12px;padding:.75rem 1rem">
+  <i class="bi bi-check-circle-fill"></i> {{ success }}
+</div>
+{% endif %}
+
+{% if error %}
+<div class="alert d-flex align-items-center gap-2 mb-4"
+     style="background:rgba(247,95,95,.12);border:1px solid rgba(247,95,95,.3);color:#f75f5f;border-radius:12px;padding:.75rem 1rem">
+  <i class="bi bi-exclamation-triangle-fill"></i> {{ error }}
+</div>
+{% endif %}
+
+<div class="row g-4 justify-content-center">
+
+  <!-- Account info card -->
+  <div class="col-12 col-lg-4">
+    <div class="panel p-4 text-center">
+      <div style="width:72px;height:72px;border-radius:50%;background:var(--argus-panel2);
+                  border:2px solid var(--argus-border);display:flex;align-items:center;
+                  justify-content:center;margin:0 auto .75rem">
+        <i class="bi bi-person-fill" style="font-size:2rem;color:var(--argus-muted)"></i>
+      </div>
+      <div style="font-weight:700;font-size:1.1rem">{{ current_user.username }}</div>
+      <div class="text-muted" style="font-size:.8rem">
+        {% if current_user.role == 'admin' %}
+          <span class="badge-kev" style="font-size:.7rem">admin</span>
+        {% else %}
+          viewer
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-lg-7">
+
+    <!-- Change Password -->
+    <div class="panel mb-4">
+      <div class="panel-header"><i class="bi bi-lock me-2"></i>Change Password</div>
+      <div class="p-4">
+        <form method="POST">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="action" value="change_password">
+          <div class="mb-3">
+            <label class="form-label">Current Password</label>
+            <input type="password" class="form-control" name="current_password"
+                   placeholder="Enter current password" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">New Password</label>
+            <input type="password" class="form-control" name="new_password" id="newPw"
+                   placeholder="At least 6 characters" required minlength="6">
+          </div>
+          <div class="mb-4">
+            <label class="form-label">Confirm New Password</label>
+            <input type="password" class="form-control" name="confirm_password" id="confirmPw"
+                   placeholder="Repeat new password" required>
+          </div>
+          <button class="btn btn-primary" type="submit">
+            <i class="bi bi-check-lg me-1"></i>Update Password
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Change Username -->
+    <div class="panel mb-4">
+      <div class="panel-header"><i class="bi bi-person-gear me-2"></i>Change Username</div>
+      <div class="p-4">
+        <form method="POST">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="action" value="change_username">
+          <div class="mb-3">
+            <label class="form-label">New Username</label>
+            <input class="form-control" name="new_username" placeholder="At least 3 characters"
+                   required minlength="3" maxlength="32">
+          </div>
+          <div class="mb-4">
+            <label class="form-label">Confirm with Current Password</label>
+            <input type="password" class="form-control" name="confirm_password_username"
+                   placeholder="Enter your current password" required>
+          </div>
+          <div class="alert" style="background:rgba(255,193,7,.08);border:1px solid rgba(255,193,7,.25);
+                                   color:#ffc107;border-radius:10px;padding:.6rem .9rem;font-size:.8rem;margin-bottom:1rem">
+            <i class="bi bi-info-circle me-1"></i>
+            Changing your username will log you out. You will need to log in again with the new username.
+          </div>
+          <button class="btn btn-primary" type="submit">
+            <i class="bi bi-person-check me-1"></i>Update Username
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Danger Zone: Delete Account -->
+    <div class="panel" style="border-color:rgba(247,95,95,.25)">
+      <div class="panel-header" style="color:#f75f5f;background:rgba(247,95,95,.06)">
+        <i class="bi bi-exclamation-triangle me-2"></i>Danger Zone
+      </div>
+      <div class="p-4">
+        <p class="text-muted" style="font-size:.85rem">
+          Permanently delete your account. This action cannot be undone.
+        </p>
+        <button class="btn btn-sm" style="color:#f75f5f;border:1px solid rgba(247,95,95,.4)"
+                data-bs-toggle="modal" data-bs-target="#deleteModal">
+          <i class="bi bi-trash me-1"></i>Delete My Account
+        </button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="background:var(--argus-panel);border:1px solid var(--argus-border);border-radius:16px">
+      <div class="modal-header" style="border-color:var(--argus-border)">
+        <h5 class="modal-title" style="color:#f75f5f"><i class="bi bi-exclamation-triangle me-2"></i>Delete Account</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted" style="font-size:.875rem">
+          You are about to permanently delete the account <strong style="color:var(--argus-text)">{{ current_user.username }}</strong>.
+          This cannot be undone. Enter your password to confirm.
+        </p>
+        <form method="POST" action="/delete_account" id="deleteForm">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="mb-3">
+            <label class="form-label">Your Password</label>
+            <input type="password" class="form-control" name="confirm_password"
+                   placeholder="Enter password to confirm" required>
+          </div>
+          <button class="btn w-100" type="submit"
+                  style="background:rgba(247,95,95,.15);color:#f75f5f;border:1px solid rgba(247,95,95,.4);border-radius:8px;font-weight:600">
+            <i class="bi bi-trash me-1"></i>Yes, Delete My Account
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

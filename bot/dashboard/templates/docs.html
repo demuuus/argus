@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+{% block title %}Documentation — Argus{% endblock %}
+{% block content %}
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-md-3">
+            <div class="panel p-3 sticky-top">
+                <h5>Documentation</h5>
+                <div class="list-group">
+                    <a href="#intro" class="list-group-item list-group-item-action">Introduction</a>
+                    <a href="#installation" class="list-group-item list-group-item-action">Installation Guide</a>
+                    <a href="#userguide" class="list-group-item list-group-item-action">User Guide</a>
+                    <a href="#dashboard" class="list-group-item list-group-item-action">Dashboard</a>
+                    <a href="#assets" class="list-group-item list-group-item-action">Assets</a>
+                    <a href="#findings" class="list-group-item list-group-item-action">Findings</a>
+                    <a href="#reports" class="list-group-item list-group-item-action">Reports</a>
+                    <a href="#charts" class="list-group-item list-group-item-action">Charts</a>
+                    <a href="#cves" class="list-group-item list-group-item-action">CVE Search</a>
+                    <a href="#telegram" class="list-group-item list-group-item-action">Telegram Bot</a>
+                    <a href="#architecture" class="list-group-item list-group-item-action">Architecture</a>
+                    <a href="#faq" class="list-group-item list-group-item-action">FAQ</a>
+                    <a href="#roadmap" class="list-group-item list-group-item-action">Roadmap</a>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-9">
+            <h1 id="intro">ARGUS Documentation</h1>
+            <p>
+                ARGUS is a Vulnerability Management Platform designed to identify,
+                prioritize, and report vulnerabilities affecting organizational assets.
+            </p>
+            <hr>
+            <h2 id="installation">Installation Guide</h2>
+            <p>
+                ARGUS requires PostgreSQL, Python, an NVD API Key,
+                and a Telegram Bot Token.
+            </p>
+            
+            <h5>Requirements</h5>
+            <ul>
+                <li>Ubuntu 22.04+</li>
+                <li>Python 3.11+</li>
+                <li>PostgreSQL 14+</li>
+                <li>NVD API Key</li>
+                <li>Telegram Bot Token</li>
+            </ul>
+            
+            <h5>Clone Repository</h5>
+            <pre>
+                git clone https://github.com/your-org/argus.git
+                cd argus
+            </pre>
+            
+            <h5>Create Virtual Environment</h5>
+            <pre>
+                python3 -m venv venv
+                source venv/bin/activate
+            </pre>
+            
+            <h5>Install Dependencies</h5>
+            <pre>
+                pip install -r requirements.txt
+            </pre>
+            
+            <h5>Run Dashboard</h5>
+            <pre>
+                python app.py
+            </pre>
+            
+            <h5>Run Telegram Bot</h5>
+            <pre>
+                python bot.py
+            </pre>
+            <hr>
+
+            <h2 id="userguide">User Guide</h2>
+
+            <h5>Dashboard</h5>
+
+            <p>
+                View asset counts, findings, KEVs,
+                reports, and security statistics.
+            </p>
+
+            <h5>Assets</h5>
+
+            <p>
+                Track software, operating systems,
+                services, and infrastructure assets.
+            </p>
+
+            <h5>Findings</h5>
+
+            <p>
+                View vulnerabilities affecting assets,
+                including CVSS, KEV status, and risk score.
+            </p>
+
+            <h5>Reports</h5>
+
+            <p>
+                Generate PDF reports for management
+                and security teams.
+            </p>
+
+            <h5>Charts</h5>
+
+            <p>
+                Analyze trends through interactive charts
+                and visualizations.
+            </p>
+
+            <h5>CVE Search</h5>
+
+            <p>
+                Search live NVD vulnerability data
+                directly from ARGUS.
+            </p>
+            <hr>
+
+            <h2 id="dashboard">Dashboard</h2>
+            <p>
+                The Dashboard provides a high-level overview of assets,
+                vulnerabilities, findings, and known exploited vulnerabilities.
+            </p>
+            <hr>
+
+            <h2 id="assets">Assets</h2>
+            <p>
+                Assets represent software, operating systems,
+                hardware, and services tracked by ARGUS.
+            </p>
+            <ul>
+                <li>Vendor</li>
+                <li>Product</li>
+                <li>Version</li>
+                <li>Criticality</li>
+            </ul>
+            <hr>
+
+            <h2 id="findings">Findings</h2>
+            <p>
+                Findings link assets with identified vulnerabilities.
+            </p>
+            <ul>
+                <li>CVE</li>
+                <li>CVSS</li>
+                <li>KEV</li>
+                <li>Risk Score</li>
+            </ul>
+            <hr>
+
+            <h2 id="reports">Reports</h2>
+            <p>
+                ARGUS generates PDF reports summarizing findings
+                and organizational risk exposure.
+            </p>
+            <hr>
+
+            <h2 id="charts">Charts</h2>
+            <p>
+                Interactive charts provide visibility into:
+            </p>
+            <ul>
+                <li>Risk Distribution</li>
+                <li>Top Vendors</li>
+                <li>KEV Distribution</li>
+                <li>Asset Findings</li>
+            </ul>
+            <hr>
+
+            <h2 id="cves">CVE Search</h2>
+            <p>
+                Search live vulnerability data from the National Vulnerability Database (NVD).
+            </p>
+            <ul>
+                <li>Keyword Search</li>
+                <li>CVSS Sorting</li>
+                <li>CVE Sorting</li>
+                <li>Pagination</li>
+            </ul>
+            <hr>
+
+            <h2 id="telegram">Telegram Bot</h2>
+            <h5>/help</h5>
+            <p>Display available commands.</p>
+
+            <h5>/scan</h5>
+            <p>Scan all tracked assets against NVD.</p>
+
+            <h5>/report</h5>
+            <p>Generate and download reports.</p>
+
+            <h5>/today</h5>
+            <p>Display today's scan statistics.</p>
+
+            <p>
+                The Telegram Bot provides remote access
+                to ARGUS functionality without opening
+                the dashboard.
+            </p>
+            <hr>
+
+            <h2 id="architecture">Architecture</h2>
+            <pre>
+            Assets
+            │
+            ▼
+            ├── NVD API
+            │
+            ├── KEV
+            ├── EPSS
+            │
+            ▼
+            ├── Risk Engine
+            ▼
+            ├── Dashboard
+            ├── Reports
+            ├── Charts
+            ├── Telegram
+            └── AI
+            </pre>
+            <hr>
+
+            <h2 id="faq">FAQ</h2>
+
+            <h5>Where does ARGUS get vulnerability data?</h5>
+
+            <p>
+                ARGUS retrieves vulnerability data from
+                the <a href="https://nvd.nist.gov/">National Vulnerability Database</a> (NVD).
+            </p>
+
+            <h5>Does ARGUS support KEV?</h5>
+
+            <p>
+                Yes. Known Exploited Vulnerabilities
+                are identified and prioritized.
+            </p>
+
+            <h5>Does ARGUS support EPSS?</h5>
+
+            <p>
+                Planned for future releases.
+            </p>
+
+            <h5>Does ARGUS require internet access?</h5>
+
+            <p>
+                Yes, for live NVD searches and
+                vulnerability updates.
+            </p>
+            <hr>
+
+            <h2 id="roadmap">Roadmap</h2>
+            <ul>
+                <li>AI Summary</li>
+                <li>AI Recommendations</li>
+                <li>Agentic Workflows</li>
+                <li>Production Deployment</li>
+                <li>Community Discussion and Posts</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

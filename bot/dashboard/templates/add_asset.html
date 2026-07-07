@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}Add Asset — Argus{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center gap-2 mb-4">
+  <a href="/assets" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-chevron-left me-1"></i>Assets
+  </a>
+  <div class="page-title mb-0">Add Asset</div>
+</div>
+
+<div class="row justify-content-center">
+  <div class="col-12 col-md-10 col-lg-7 col-xl-6">
+    <div class="panel">
+      <div class="panel-header"><i class="bi bi-plus-circle me-2"></i>New Asset Details</div>
+      <div class="p-4">
+        <form method="POST">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+          <div class="row g-3 mb-3">
+            <div class="col-sm-6">
+              <label class="form-label">Vendor <span class="text-danger">*</span></label>
+              <input class="form-control" name="vendor" placeholder="e.g. TP-Link" required autofocus>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label">Product <span class="text-danger">*</span></label>
+              <input class="form-control" name="product" placeholder="e.g. Archer AX10" required>
+            </div>
+          </div>
+
+          <div class="row g-3 mb-3">
+            <div class="col-sm-6">
+              <label class="form-label">Version <span class="text-danger">*</span></label>
+              <input class="form-control" name="version" placeholder="e.g. 1.0" required>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label">Type</label>
+              <select class="form-select" name="type">
+                {% for t in valid_types %}
+                <option value="{{ t }}" {% if t == 'Unknown' %}selected{% endif %}>{{ t }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="row g-3 mb-3">
+            <div class="col-sm-6">
+              <label class="form-label">Exposure</label>
+              <select class="form-select" name="exposure">
+                {% for e in valid_exposures %}
+                <option value="{{ e }}" {% if e == 'Internal' %}selected{% endif %}>{{ e }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label">
+                Function
+                <span class="text-muted" style="font-size:.72rem;font-weight:400">(network role)</span>
+              </label>
+              <select class="form-select" name="function">
+                <option value="">— Not specified —</option>
+                {% for f in valid_functions %}
+                <option value="{{ f }}">{{ f }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="row g-3 mb-3">
+            <div class="col-sm-6">
+              <label class="form-label">Priority / Criticality</label>
+              <select class="form-select" name="priority">
+                <option value="">— Select —</option>
+                {% for p in ['Low', 'Medium', 'High', 'Critical'] %}
+                <option>{{ p }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label">Location</label>
+              <input class="form-control" name="location" placeholder="e.g. Data Center A">
+            </div>
+          </div>
+
+          <div class="row g-3 mb-3">
+            <div class="col-sm-6">
+              <label class="form-label">Owner</label>
+              <input class="form-control" name="owner" placeholder="e.g. IT Team">
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label">
+                Search Keyword
+                <span class="text-muted" style="font-size:.72rem;font-weight:400">(NVD lookup keyword)</span>
+              </label>
+              <input class="form-control" name="search_keyword" placeholder="e.g. TP-Link Archer AX10">
+            </div>
+          </div>
+
+          <div class="row g-3 mb-3">
+            <div class="col-sm-6">
+              <label class="form-label">Country</label>
+              <select class="form-select" name="country_code" id="countrySelect">
+                <option value="">— Not specified —</option>
+                {% for code, info in supported_locations.items() %}
+                <option value="{{ code }}">{{ info.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-sm-6">
+              <label class="form-label">City</label>
+              <select class="form-select" name="city" id="citySelect">
+                <option value="">— Select a country first —</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="mb-4">
+            <label class="form-label">Notes</label>
+            <textarea class="form-control" name="notes" rows="3" placeholder="Any additional context…"></textarea>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button class="btn btn-primary px-4" type="submit">
+              <i class="bi bi-plus-lg me-1"></i>Add Asset
+            </button>
+            <a href="/assets" class="btn btn-outline-secondary">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Country -> City dependent dropdown. SUPPORTED_LOCATIONS is rendered
+// server-side as JSON so the client never has its own separate, possibly
+// stale, copy of the approved location list — and backend validation
+// (config/locations.is_valid_city) still rejects any mismatch regardless
+// of what this script does, per the feature's explicit requirement to
+// never trust frontend validation alone.
+const SUPPORTED_LOCATIONS = {{ supported_locations | tojson | safe }};
+
+function populateCityDropdown(countryCode, selectedCity) {
+  const citySelect = document.getElementById("citySelect");
+  citySelect.innerHTML = "";
+
+  if (!countryCode || !SUPPORTED_LOCATIONS[countryCode]) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "— Select a country first —";
+    citySelect.appendChild(opt);
+    return;
+  }
+
+  const placeholderOpt = document.createElement("option");
+  placeholderOpt.value = "";
+  placeholderOpt.textContent = "— Select a city —";
+  citySelect.appendChild(placeholderOpt);
+
+  SUPPORTED_LOCATIONS[countryCode].cities.forEach((city) => {
+    const opt = document.createElement("option");
+    opt.value = city;
+    opt.textContent = city;
+    if (city === selectedCity) opt.selected = true;
+    citySelect.appendChild(opt);
+  });
+}
+
+document.getElementById("countrySelect").addEventListener("change", (e) => {
+  populateCityDropdown(e.target.value, null);
+});
+</script>
+{% endblock %}
