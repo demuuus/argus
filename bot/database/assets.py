@@ -292,26 +292,7 @@ def get_unassigned_asset_count():
         conn.close()
 
 
-def count_patch_plan(scope="scheduled"):
-    """Row count for get_patch_plan()'s given scope — used to compute
-    total pages for the Patch Plan page's pagination, without pulling
-    every row just to count them."""
-    conn = get_connection()
-    try:
-        with conn.cursor() as cur:
-            base_where = "FROM matches m WHERE m.status NOT IN ('Resolved', 'Accepted Risk', 'False Positive')"
-            if scope == "scheduled":
-                cur.execute(f"SELECT COUNT(*) {base_where} AND m.planned_patch_date IS NOT NULL")
-            elif scope == "unscheduled":
-                cur.execute(f"SELECT COUNT(*) {base_where} AND m.planned_patch_date IS NULL")
-            else:
-                cur.execute(f"SELECT COUNT(*) {base_where}")
-            return cur.fetchone()[0]
-    finally:
-        conn.close()
-
-
-def get_patch_plan(scope="scheduled", limit=25, offset=0):
+def get_patch_plan(scope="scheduled"):
     """
     Patch Planning view: one row per open finding, for scheduling.
 
@@ -332,13 +313,6 @@ def get_patch_plan(scope="scheduled", limit=25, offset=0):
     finding has nothing left to plan, matching how /findings' own status
     filter and get_overdue_findings-style queries elsewhere in ARGUS
     already treat those three statuses as "closed out".
-
-    limit/offset paginate the result — with fleets that can have hundreds
-    of open findings (see count_patch_plan), returning every row on every
-    page load doesn't scale; callers should page through this the same
-    way /findings already does. Pass limit=None for the old "give me
-    everything" behavior (a few existing/future callers may still want
-    that; the web UI always paginates).
     """
     conn = get_connection()
     try:
@@ -366,25 +340,20 @@ def get_patch_plan(scope="scheduled", limit=25, offset=0):
                 WHERE m.status NOT IN ('Resolved', 'Accepted Risk', 'False Positive')
             """
             if scope == "scheduled":
-                query = (
+                cur.execute(
                     base_select + " AND m.planned_patch_date IS NOT NULL "
                     "ORDER BY m.planned_patch_date ASC, m.risk_score DESC"
                 )
             elif scope == "unscheduled":
-                query = (
+                cur.execute(
                     base_select + " AND m.planned_patch_date IS NULL "
                     "ORDER BY m.risk_score DESC"
                 )
             else:
-                query = (
+                cur.execute(
                     base_select + " ORDER BY "
                     "(m.planned_patch_date IS NULL) ASC, m.planned_patch_date ASC, m.risk_score DESC"
                 )
-            params = []
-            if limit is not None:
-                query += " LIMIT %s OFFSET %s"
-                params = [limit, offset]
-            cur.execute(query, params)
             return cur.fetchall()
     finally:
         conn.close()

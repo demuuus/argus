@@ -200,8 +200,12 @@ def update_match_assignment(asset_id: int, cve_id: str,
         conn.close()
 
 
+_ASSIGNED_TO_UNSET = object()
+
+
 def update_patch_plan(asset_id: int, cve_id: str,
-                       planned_patch_date, patch_notes: str) -> None:
+                       planned_patch_date, patch_notes: str,
+                       assigned_to=_ASSIGNED_TO_UNSET) -> None:
     """
     Set/clear the planned patch date and scheduling notes for a finding.
 
@@ -210,19 +214,36 @@ def update_patch_plan(asset_id: int, cve_id: str,
     decision, independent of both. Pass planned_patch_date=None to clear
     a previously-set date (e.g. a patch was rescheduled to "not yet
     decided").
+
+    assigned_to is optional and left completely untouched unless the
+    caller explicitly passes it (including an empty string, which clears
+    it) — callers that only ever manage the date/notes (like the inline
+    quick-set field on the asset page) must never accidentally wipe out
+    an existing assignment just because their form doesn't have that
+    field.
     """
     conn = get_connection()
     try:
         with conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE matches
-                    SET planned_patch_date = %s, patch_notes = %s
-                    WHERE asset_id = %s AND cve_id = %s
-                    """,
-                    (planned_patch_date, patch_notes or None, asset_id, cve_id),
-                )
+                if assigned_to is _ASSIGNED_TO_UNSET:
+                    cur.execute(
+                        """
+                        UPDATE matches
+                        SET planned_patch_date = %s, patch_notes = %s
+                        WHERE asset_id = %s AND cve_id = %s
+                        """,
+                        (planned_patch_date, patch_notes or None, asset_id, cve_id),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE matches
+                        SET planned_patch_date = %s, patch_notes = %s, assigned_to = %s
+                        WHERE asset_id = %s AND cve_id = %s
+                        """,
+                        (planned_patch_date, patch_notes or None, assigned_to or None, asset_id, cve_id),
+                    )
     finally:
         conn.close()
 

@@ -1384,20 +1384,16 @@ hr { border-color: var(--argus-border); opacity: 1; }
   gap: 4px;
 }
 
-.date-field-input-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-}
-
 .date-field-text {
   background: var(--argus-dark);
   border: 1px solid var(--argus-border);
   color: var(--argus-text);
   border-radius: 8px;
   font-size: .82rem;
-  padding: .3rem 1.6rem .3rem .5rem;
-  width: 108px;
+  padding: .3rem .5rem;
+  width: 128px;
+  flex-shrink: 0;
+  box-sizing: border-box;
   font-variant-numeric: tabular-nums;
   transition: border-color .15s, box-shadow .15s;
 }
@@ -1411,30 +1407,6 @@ hr { border-color: var(--argus-border); opacity: 1; }
   border-color: #f75f5f;
   box-shadow: 0 0 0 3px rgba(247,95,95,.15);
 }
-
-.date-field-clear {
-  position: absolute;
-  right: 5px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  background: transparent;
-  border: none;
-  color: var(--argus-muted);
-  border-radius: 50%;
-  cursor: pointer;
-  padding: 0;
-  transition: background .15s, color .15s;
-}
-.date-field-clear:hover {
-  color: var(--argus-text);
-  background: var(--argus-hover);
-}
-.date-field-clear svg { width: 12px; height: 12px; }
 
 .date-field-toggle {
   display: flex;

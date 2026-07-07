@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% from "_macros.html" import date_field, pagination_bar %}
+{% from "_macros.html" import date_field %}
 {% block title %}Patch Plan — Argus{% endblock %}
 {% block content %}
 
 <div class="d-flex align-items-center gap-3 mb-4">
   <div class="page-title mb-0">Patch Plan</div>
   <span class="text-muted" style="font-size:.82rem">
-    {{ sched_total }} scheduled · {{ unsched_total }} unscheduled
+    {{ scheduled_count }} scheduled · {{ unscheduled_count }} unscheduled
   </span>
 </div>
 
@@ -30,21 +30,16 @@
         <th>Due Date</th>
         <th>Assigned To</th>
         <th>Notes</th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
       {% for f in scheduled %}
       <tr>
         <td>
-          <form method="POST" action="/finding/update_patch_plan" class="d-flex align-items-center gap-1">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="asset_id" value="{{ f.asset_id }}">
-            <input type="hidden" name="cve_id"   value="{{ f.cve_id }}">
-            <input type="hidden" name="ref"       value="patch_plan">
-            {{ date_field(name="planned_patch_date", value=f.planned_patch_date, autosubmit=true) }}
-          </form>
+          {{ f.planned_patch_date.strftime('%d/%m/%Y') if f.planned_patch_date else '—' }}
           {% if f.status not in ['Resolved','Accepted Risk','False Positive'] and f.planned_patch_date < today %}
-          <span class="text-danger" style="font-size:.7rem">overdue</span>
+          <div class="text-danger" style="font-size:.7rem">overdue</div>
           {% endif %}
         </td>
         <td><a href="/finding/{{ f.cve_id }}?ref=patch_plan">{{ f.cve_id }}</a></td>
@@ -70,18 +65,42 @@
         <td style="max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="{{ f.patch_notes or '' }}">
           {{ f.patch_notes or '—' }}
         </td>
+        <td>
+          <button type="button" class="btn btn-sm patch-plan-edit-btn" data-bs-toggle="modal" data-bs-target="#patchPlanModal"
+                  data-asset-id="{{ f.asset_id }}" data-cve-id="{{ f.cve_id }}"
+                  data-label="{{ f.cve_id }} — {{ f.vendor }} {{ f.product }}"
+                  data-date="{{ f.planned_patch_date.strftime('%Y-%m-%d') if f.planned_patch_date else '' }}"
+                  data-assigned-to="{{ f.assigned_to or '' }}"
+                  data-notes="{{ f.patch_notes or '' }}"
+                  data-scheduled="true">
+            <i class="bi bi-pencil"></i>
+          </button>
+        </td>
       </tr>
       {% else %}
-      <tr><td colspan="10" class="text-muted text-center py-4">No patches currently scheduled.</td></tr>
+      <tr><td colspan="11" class="text-muted text-center py-4">No patches currently scheduled.</td></tr>
       {% endfor %}
     </tbody>
   </table>
-  {{ pagination_bar(
-       base_url="/patch_plan", prefix="sched",
-       page=sched_page, per_page=sched_per_page,
-       total=sched_total, total_pages=sched_total_pages,
-       preserve_qs="unsched_page=" ~ unsched_page ~ "&unsched_per_page=" ~ unsched_per_page
-     ) }}
+
+  {% if sched_total_pages > 1 %}
+  <div class="d-flex align-items-center justify-content-between p-3 border-top"
+       style="border-color:var(--argus-border)!important">
+    <div class="pagination-bar">
+      {% if sched_page > 1 %}
+      <a class="btn btn-outline-secondary btn-sm" href="/patch_plan?sched_page={{ sched_page - 1 }}&unsched_page={{ unsched_page }}">
+        <i class="bi bi-chevron-left"></i> Prev
+      </a>
+      {% endif %}
+      <span class="page-info">Page {{ sched_page }} / {{ sched_total_pages }}</span>
+      {% if sched_page < sched_total_pages %}
+      <a class="btn btn-outline-secondary btn-sm" href="/patch_plan?sched_page={{ sched_page + 1 }}&unsched_page={{ unsched_page }}">
+        Next <i class="bi bi-chevron-right"></i>
+      </a>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
 </div>
 
 <div class="panel">
@@ -99,7 +118,7 @@
         <th>Risk</th>
         <th>Status</th>
         <th>Due Date</th>
-        <th>Set Planned Date</th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
@@ -125,13 +144,13 @@
           {% else %}<span class="text-muted">—</span>{% endif %}
         </td>
         <td>
-          <form method="POST" action="/finding/update_patch_plan" class="d-flex align-items-center gap-1">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="asset_id" value="{{ f.asset_id }}">
-            <input type="hidden" name="cve_id"   value="{{ f.cve_id }}">
-            <input type="hidden" name="ref"       value="patch_plan">
-            {{ date_field(name="planned_patch_date", value=None, autosubmit=true) }}
-          </form>
+          <button type="button" class="btn btn-sm btn-outline-secondary patch-plan-edit-btn" data-bs-toggle="modal" data-bs-target="#patchPlanModal"
+                  data-asset-id="{{ f.asset_id }}" data-cve-id="{{ f.cve_id }}"
+                  data-label="{{ f.cve_id }} — {{ f.vendor }} {{ f.product }}"
+                  data-date="" data-assigned-to="" data-notes=""
+                  data-scheduled="false">
+            <i class="bi bi-calendar-plus me-1"></i>Schedule
+          </button>
         </td>
       </tr>
       {% else %}
@@ -139,16 +158,101 @@
       {% endfor %}
     </tbody>
   </table>
-  {{ pagination_bar(
-       base_url="/patch_plan", prefix="unsched",
-       page=unsched_page, per_page=unsched_per_page,
-       total=unsched_total, total_pages=unsched_total_pages,
-       preserve_qs="sched_page=" ~ sched_page ~ "&sched_per_page=" ~ sched_per_page
-     ) }}
+
+  {% if unsched_total_pages > 1 %}
+  <div class="d-flex align-items-center justify-content-between p-3 border-top"
+       style="border-color:var(--argus-border)!important">
+    <div class="pagination-bar">
+      {% if unsched_page > 1 %}
+      <a class="btn btn-outline-secondary btn-sm" href="/patch_plan?sched_page={{ sched_page }}&unsched_page={{ unsched_page - 1 }}">
+        <i class="bi bi-chevron-left"></i> Prev
+      </a>
+      {% endif %}
+      <span class="page-info">Page {{ unsched_page }} / {{ unsched_total_pages }}</span>
+      {% if unsched_page < unsched_total_pages %}
+      <a class="btn btn-outline-secondary btn-sm" href="/patch_plan?sched_page={{ sched_page }}&unsched_page={{ unsched_page + 1 }}">
+        Next <i class="bi bi-chevron-right"></i>
+      </a>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Patch plan edit modal — one shared instance, repopulated per row by JS -->
+<div class="modal fade" id="patchPlanModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content" style="background:var(--argus-panel);border:1px solid var(--argus-border);border-radius:16px">
+      <form method="POST" action="/finding/update_patch_plan" id="patchPlanForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="ref" value="patch_plan">
+        <input type="hidden" name="asset_id" id="patchPlanAssetId">
+        <input type="hidden" name="cve_id" id="patchPlanCveId">
+
+        <div class="modal-header" style="border-color:var(--argus-border)">
+          <div>
+            <h5 class="modal-title mb-0">Patch schedule</h5>
+            <div class="text-muted" id="patchPlanLabel" style="font-size:.8rem"></div>
+          </div>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">Planned date</label><br>
+            {{ date_field(name="planned_patch_date", value=None) }}
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Assigned to</label>
+            <input type="text" class="form-control" name="assigned_to" id="patchPlanAssignedTo"
+                   placeholder="Who's handling this?" maxlength="120">
+          </div>
+
+          <div class="mb-1">
+            <label class="form-label">Notes</label>
+            <textarea class="form-control" name="patch_notes" id="patchPlanNotes" rows="3"
+                      placeholder="Maintenance window, rollback plan, anything worth remembering"></textarea>
+          </div>
+        </div>
+
+        <div class="modal-footer" style="border-color:var(--argus-border)">
+          <button type="submit" name="clear_schedule" value="1" id="patchPlanRemoveBtn"
+                  class="btn btn-sm me-auto" style="color:#f75f5f;border:1px solid rgba(247,95,95,.4)">
+            Remove from schedule
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-sm btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 
 {% endblock %}
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='js/date_input.js') }}"></script>
+<script>
+(function () {
+  "use strict";
+
+  const modalEl = document.getElementById("patchPlanModal");
+  const dateFieldRoot = modalEl.querySelector(".date-field");
+
+  document.querySelectorAll(".patch-plan-edit-btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      document.getElementById("patchPlanAssetId").value = btn.dataset.assetId;
+      document.getElementById("patchPlanCveId").value = btn.dataset.cveId;
+      document.getElementById("patchPlanLabel").textContent = btn.dataset.label;
+      document.getElementById("patchPlanAssignedTo").value = btn.dataset.assignedTo;
+      document.getElementById("patchPlanNotes").value = btn.dataset.notes;
+
+      if (dateFieldRoot._dateField) dateFieldRoot._dateField.setValue(btn.dataset.date);
+
+      document.getElementById("patchPlanRemoveBtn").hidden = (btn.dataset.scheduled !== "true");
+    });
+  });
+})();
+</script>
 {% endblock %}

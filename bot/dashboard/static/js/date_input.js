@@ -74,10 +74,10 @@
   class DateField {
     constructor(root) {
       this.root = root;
+      root._dateField = this;
       this.text = root.querySelector(".date-field-text");
       this.iso = root.querySelector(".date-field-iso");
       this.toggle = root.querySelector(".date-field-toggle");
-      this.clearBtn = root.querySelector(".date-field-clear");
       this.popup = root.querySelector(".date-field-calendar");
       this.autosubmit = root.dataset.autosubmit === "true";
 
@@ -96,7 +96,6 @@
       this.viewYear = viewBase.y;
       this.viewMonth = viewBase.m;
 
-      this._updateClearButton();
       this._bind();
     }
 
@@ -113,7 +112,6 @@
           this.text.selectionStart = this.text.selectionEnd = this.text.value.length;
         }
         this._clearError();
-        this._updateClearButton();
       });
 
       this.text.addEventListener("blur", () => this._commitTyped());
@@ -131,25 +129,10 @@
         this.popup.hidden ? this._openPopup() : this._closePopup();
       });
 
-      this.clearBtn.addEventListener("click", (e) => {
-        e.preventDefault();
-        this.text.value = "";
-        this.iso.value = "";
-        this._clearError();
-        this._updateClearButton();
-        this.text.focus();
-        this._maybeSubmit();
-      });
-
       document.addEventListener("click", (e) => {
         if (!this.root.contains(e.target)) this._closePopup();
       });
     }
-
-    _updateClearButton() {
-      this.clearBtn.hidden = this.text.value.trim() === "";
-    }
-
 
     _clearError() {
       this.text.classList.remove("date-field-invalid");
@@ -171,7 +154,6 @@
       if (raw === "") {
         this.iso.value = "";
         this._clearError();
-        this._updateClearButton();
         this._maybeSubmit();
         return;
       }
@@ -183,7 +165,6 @@
       this.iso.value = toISO(parsed.y, parsed.m, parsed.d);
       this.text.value = toDMY(parsed.y, parsed.m, parsed.d);
       this._clearError();
-      this._updateClearButton();
       this._maybeSubmit();
     }
 
@@ -192,6 +173,27 @@
         const form = this.root.closest("form");
         if (form) form.requestSubmit ? form.requestSubmit() : form.submit();
       }
+    }
+
+    /** Repopulate this field with a new value (or clear it with "" / null).
+     *  Used when one date-field instance lives inside a shared modal and
+     *  gets reused for whichever row's "Edit" button was just clicked. */
+    setValue(iso) {
+      const parsed = iso ? parseISO(iso) : null;
+      if (parsed) {
+        this.iso.value = toISO(parsed.y, parsed.m, parsed.d);
+        this.text.value = toDMY(parsed.y, parsed.m, parsed.d);
+        this.viewYear = parsed.y;
+        this.viewMonth = parsed.m;
+      } else {
+        this.iso.value = "";
+        this.text.value = "";
+        const t = this._today();
+        this.viewYear = t.y;
+        this.viewMonth = t.m;
+      }
+      this._clearError();
+      this._closePopup();
     }
 
     _openPopup() {
@@ -216,7 +218,6 @@
       this.iso.value = toISO(y, m, d);
       this.text.value = toDMY(y, m, d);
       this._clearError();
-      this._updateClearButton();
       this._closePopup();
       this._maybeSubmit();
     }
@@ -256,10 +257,19 @@
         <div class="date-field-cal-grid">${cells}</div>
       `;
 
-      this.popup.querySelector('[data-nav="-1"]').addEventListener("click", () => this._changeMonth(-1));
-      this.popup.querySelector('[data-nav="1"]').addEventListener("click", () => this._changeMonth(1));
+      this.popup.querySelector('[data-nav="-1"]').addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._changeMonth(-1);
+      });
+      this.popup.querySelector('[data-nav="1"]').addEventListener("click", (e) => {
+        e.stopPropagation();
+        this._changeMonth(1);
+      });
       this.popup.querySelectorAll("[data-day]").forEach((btn) => {
-        btn.addEventListener("click", () => this._selectDay(y, m, parseInt(btn.dataset.day, 10)));
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this._selectDay(y, m, parseInt(btn.dataset.day, 10));
+        });
       });
     }
   }

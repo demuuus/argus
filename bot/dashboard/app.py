@@ -1457,11 +1457,12 @@ def update_finding_assignment():
 @login_required
 def update_patch_plan():
     """
-    Set/clear the planned patch date + scheduling notes for a single
-    (asset_id, cve_id) finding. Mirrors update_finding_status /
-    update_finding_assignment exactly (same auth, same ref-based
-    redirect-back, same form shape) so the existing inline-edit UX
-    pattern used throughout findings/asset pages stays consistent.
+    Set/clear the planned patch date + scheduling notes (and, from the
+    Patch Plan page's edit modal, the assignee) for a single (asset_id,
+    cve_id) finding. Mirrors update_finding_status / update_finding_assignment
+    exactly (same auth, same ref-based redirect-back, same form shape) so
+    the existing inline-edit UX pattern used throughout findings/asset
+    pages stays consistent.
 
     Deliberately does NOT require @admin_required, unlike
     update_finding_assignment — scheduling a patch date is closer to
@@ -1471,19 +1472,33 @@ def update_patch_plan():
     asset_id = int(request.form["asset_id"])
     cve_id   = request.form["cve_id"]
 
-    raw_date = (request.form.get("planned_patch_date", "") or "").strip()
-    patch_notes = (request.form.get("patch_notes", "") or "").strip() or None
-
-    planned_patch_date = None
-    if raw_date:
-        from datetime import datetime as _datetime
-        try:
-            planned_patch_date = _datetime.strptime(raw_date, "%Y-%m-%d").date()
-        except ValueError:
-            return "Invalid date format", 400
-
     from database.matches import update_patch_plan as _update_patch_plan
-    _update_patch_plan(asset_id, cve_id, planned_patch_date, patch_notes)
+
+    if request.form.get("clear_schedule"):
+        # "Remove from schedule" — clears the date and notes only. Any
+        # existing assignment is left alone; unscheduling isn't the same
+        # thing as un-assigning.
+        _update_patch_plan(asset_id, cve_id, None, None)
+    else:
+        raw_date = (request.form.get("planned_patch_date", "") or "").strip()
+        patch_notes = (request.form.get("patch_notes", "") or "").strip() or None
+
+        planned_patch_date = None
+        if raw_date:
+            from datetime import datetime as _datetime
+            try:
+                planned_patch_date = _datetime.strptime(raw_date, "%Y-%m-%d").date()
+            except ValueError:
+                return "Invalid date format", 400
+
+        # Only touch assigned_to if the submitting form actually has that
+        # field — the older inline quick-set date field on the asset page
+        # doesn't, and must keep not touching it.
+        if "assigned_to" in request.form:
+            assigned_to = (request.form.get("assigned_to", "") or "").strip() or None
+            _update_patch_plan(asset_id, cve_id, planned_patch_date, patch_notes, assigned_to=assigned_to)
+        else:
+            _update_patch_plan(asset_id, cve_id, planned_patch_date, patch_notes)
 
     ref = request.form.get("ref", "")
     if ref == "asset":
@@ -1506,65 +1521,43 @@ def patch_plan():
     /findings, which is a general-purpose findings browser with no
     scheduling focus — this page exists specifically to answer "what's
     coming up, and what still needs to be scheduled".
-
-    Each table paginates independently (sched_page/sched_per_page vs
-    unsched_page/unsched_per_page) so paging through the (often large)
-    Unscheduled table doesn't reset your place in Scheduled, and vice
-    versa — the two lists have very different sizes in practice (a
-    handful of scheduled patches vs. potentially hundreds of open,
-    unscheduled findings), so loading either one unpaginated doesn't
-    scale to a real fleet.
     """
-    from database.assets import get_patch_plan, count_patch_plan
+    from database.assets import get_patch_plan
     from datetime import date as _date
 
-    ALLOWED_PER_PAGE = {10, 25, 50, 100}
+    PER_PAGE = 25
 
-    def _parse_page(param_name):
-        try:
-            return max(1, int(request.args.get(param_name, 1)))
-        except (TypeError, ValueError):
-            return 1
+    try:
+        sched_page = max(1, int(request.args.get("sched_page", 1)))
+    except (TypeError, ValueError):
+        sched_page = 1
 
-    def _parse_per_page(param_name):
-        try:
-            per_page = int(request.args.get(param_name, 25))
-        except (TypeError, ValueError):
-            per_page = 25
-        return per_page if per_page in ALLOWED_PER_PAGE else 25
+    try:
+        unsched_page = max(1, int(request.args.get("unsched_page", 1)))
+    except (TypeError, ValueError):
+        unsched_page = 1
 
-    sched_page = _parse_page("sched_page")
-    sched_per_page = _parse_per_page("sched_per_page")
-    unsched_page = _parse_page("unsched_page")
-    unsched_per_page = _parse_per_page("unsched_per_page")
+    all_scheduled = get_patch_plan(scope="scheduled")
+    all_unscheduled = get_patch_plan(scope="unscheduled")
 
-    sched_total = count_patch_plan(scope="scheduled")
-    unsched_total = count_patch_plan(scope="unscheduled")
-
-    sched_total_pages = max(1, -(-sched_total // sched_per_page))     # ceil div
-    unsched_total_pages = max(1, -(-unsched_total // unsched_per_page))
+    sched_total_pages = max(1, (len(all_scheduled) + PER_PAGE - 1) // PER_PAGE)
+    unsched_total_pages = max(1, (len(all_unscheduled) + PER_PAGE - 1) // PER_PAGE)
     sched_page = min(sched_page, sched_total_pages)
     unsched_page = min(unsched_page, unsched_total_pages)
 
-    scheduled = get_patch_plan(
-        scope="scheduled", limit=sched_per_page, offset=(sched_page - 1) * sched_per_page
-    )
-    unscheduled = get_patch_plan(
-        scope="unscheduled", limit=unsched_per_page, offset=(unsched_page - 1) * unsched_per_page
-    )
+    scheduled = all_scheduled[(sched_page - 1) * PER_PAGE : sched_page * PER_PAGE]
+    unscheduled = all_unscheduled[(unsched_page - 1) * PER_PAGE : unsched_page * PER_PAGE]
 
     return render_template(
         "patch_plan.html",
         scheduled=scheduled,
         unscheduled=unscheduled,
         today=_date.today(),
+        scheduled_count=len(all_scheduled),
+        unscheduled_count=len(all_unscheduled),
         sched_page=sched_page,
-        sched_per_page=sched_per_page,
-        sched_total=sched_total,
         sched_total_pages=sched_total_pages,
         unsched_page=unsched_page,
-        unsched_per_page=unsched_per_page,
-        unsched_total=unsched_total,
         unsched_total_pages=unsched_total_pages,
     )
 
