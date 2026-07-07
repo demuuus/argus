@@ -4,6 +4,8 @@
 
 ### AI-Assisted Vulnerability Management Platform
 
+🌐 [English](README.md) | [Indonesia](README.id.md)
+
 *Track assets, correlate them against live CVE/KEV/EPSS data, prioritize by calculated risk, and get AI-grounded analysis — through a Flask dashboard or a Telegram bot.*
 
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)]()
