@@ -4,6 +4,8 @@
 
 ### AI-Assisted Vulnerability Management Platform
 
+🌐 [English](README.md) | [Indonesia](README.id.md)
+
 *Track assets, correlate them against live CVE/KEV/EPSS data, prioritize by calculated risk, and get AI-grounded analysis — through a Flask dashboard or a Telegram bot.*
 
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)]()
@@ -165,15 +167,15 @@ On top of that core pipeline, ARGUS layers an AI Security Copilot: a chat interf
 
 | View | Preview |
 |---|---|
-| Dashboard | `docs/screenshots/dashboard.png` *(pending)* |
-| Login | `docs/screenshots/login.png` *(pending)* |
-| Assets | `docs/screenshots/assets.png` *(pending)* |
-| Findings | `docs/screenshots/findings.png` *(pending)* |
-| Reports | `docs/screenshots/reports.png` *(pending)* |
-| AI Chat | `docs/screenshots/ai-chat.png` *(pending)* |
+| [Dashboard](screenshots/dashboard.png) | `docs/screenshots/dashboard.png` |
+| [Login](screenshots/login.png) | `docs/screenshots/login.png` |
+| [Assets](screenshots/assets.png) | `docs/screenshots/assets.png` |
+| [Findings](screenshots/findings.png) | `docs/screenshots/findings.png` |
+| [Reports](screenshots/reports.png) | `docs/screenshots/reports.png` |
+| [AI Chat](screenshots/ai-chat.png) | `docs/screenshots/ai-chat.png` |
 | Telegram Bot | `docs/screenshots/telegram-bot.png` *(pending)* |
-| Charts | `docs/screenshots/charts.png` *(pending)* |
-| Risk Dashboard | `docs/screenshots/risk-dashboard.png` *(pending)* |
+| [Charts](screenshots/charts.png) | `docs/screenshots/charts.png` |
+| [Risk Dashboard](screenshots/risk-dashboard.png) | `docs/screenshots/risk-dashboard.png` |
 
 ---
 
@@ -444,11 +446,11 @@ The database schema does not need to be applied manually — both `app.py` and `
 
 | Document | Description | Status |
 |---|---|---|
-| `INSTALL.md` | Full installation and production deployment guide | Not yet published — see [§13](#13-installation-overview) for a quick start |
-| `API.md` | Dashboard route and JSON API reference | Not yet published — see [§14](#14-usage-overview) for an overview |
-| `ARCHITECTURE.md` | Extended architecture and data-flow documentation | Not yet published — see [§5](#5-system-architecture) and [§8](#8-core-components) |
+| `INSTALL.md` | Full installation and production deployment guide | [INSTALL.md](INSTALL.md) — see [§13](#13-installation-overview) for a quick start |
+| `API.md` | Dashboard route and JSON API reference | [API.md](API.md) — see [§14](#14-usage-overview) for an overview |
+| `ARCHITECTURE.md` | Extended architecture and data-flow documentation | [ARCHITECTURE.md](ARCHITECTURE.md) — see [§5](#5-system-architecture) and [§8](#8-core-components) |
 | `DATABASE.md` | Full schema reference | Not yet published — see `bot/database/schema.sql` and `bot/migrate.py` in the repository |
-| `AI.md` | AI Security Copilot design and prompt reference | Not yet published — see [§10](#10-ai-capabilities) |
+| `AI.md` | AI Security Copilot design and prompt reference | [AI.md](AI.md) — see [§10](#10-ai-capabilities) |
 | `SECURITY.md` | Security model and responsible disclosure process | Not yet published — see [§11](#11-security-features) |
 | `DEPLOYMENT.md` | Containerized/production deployment | Not yet published — the `docker/` directory is currently a placeholder |
 | `ROADMAP.md` | Planned features and priorities | Not yet published — see [§17](#17-roadmap) |
@@ -536,10 +538,8 @@ ARGUS is under **active development**. The core pipeline (asset tracking, NVD/KE
 | Automated background CVE AI analysis | Implemented |
 | Scheduled scans, snapshots, and reports | Implemented |
 | City-level exposure map | Implemented |
-| Per-asset interactive risk map | Planned |
-| Published REST/GraphQL API | Planned |
+| Per-asset interactive risk map | Implemented |
 | Docker/containerized deployment | Planned (directory placeholder only) |
 | Extended documentation set (`docs/`) | Planned (directory placeholder only) |
-| Formal license | Not yet declared |
 
 This project has not undergone an external security audit. Treat it as suitable for personal, lab, or internal evaluation use, and review [§11 Security Features](#11-security-features) and [§21 Disclaimer](#21-disclaimer) before any production deployment.
