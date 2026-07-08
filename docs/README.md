@@ -449,9 +449,9 @@ The database schema does not need to be applied manually — both `app.py` and `
 | `INSTALL.md` | Full installation and production deployment guide | [INSTALL.md](INSTALL.md) — see [§13](#13-installation-overview) for a quick start |
 | `API.md` | Dashboard route and JSON API reference | [API.md](API.md) — see [§14](#14-usage-overview) for an overview |
 | `ARCHITECTURE.md` | Extended architecture and data-flow documentation | [ARCHITECTURE.md](ARCHITECTURE.md) — see [§5](#5-system-architecture) and [§8](#8-core-components) |
-| `DATABASE.md` | Full schema reference | Not yet published — see `bot/database/schema.sql` and `bot/migrate.py` in the repository |
+| `DATABASE.md` | Full schema reference | [DATABASE.md](DATABASE.md) — see `bot/database/schema.sql` and `bot/migrate.py` in the repository |
 | `AI.md` | AI Security Copilot design and prompt reference | [AI.md](AI.md) — see [§10](#10-ai-capabilities) |
-| `SECURITY.md` | Security model and responsible disclosure process | Not yet published — see [§11](#11-security-features) |
+| `SECURITY.md` | Security model and responsible disclosure process | [SECURITY.md](SECURITY.md) — see [§11](#11-security-features) |
 | `DEPLOYMENT.md` | Containerized/production deployment | Not yet published — the `docker/` directory is currently a placeholder |
 | `ROADMAP.md` | Planned features and priorities | Not yet published — see [§17](#17-roadmap) |
 
@@ -504,7 +504,6 @@ The following are **planned, not implemented**. They are listed here to communic
 
 - **NVD (National Vulnerability Database)**, maintained by NIST, for CVE and CVSS data.
 - **CISA**, for the Known Exploited Vulnerabilities (KEV) catalogue.
-- **OpenCVE**, referenced as a data-source ecosystem project in the broader CVE tooling space.
 - **FIRST.org**, for the Exploit Prediction Scoring System (EPSS).
 - The **open-source community** behind Flask, PostgreSQL, APScheduler, python-telegram-bot, ReportLab, and the wider Python ecosystem this project is built on.
 
