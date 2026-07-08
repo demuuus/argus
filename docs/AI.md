@@ -165,7 +165,7 @@ sequenceDiagram
     participant LLM as LLM_URL
 
     U->>F: {message, conversation_id?}
-    Note over F: @login_required already verified\nby Flask-Login before this point
+    Note over F: @login_required already verified<br/>by Flask-Login before this point
     F->>F: Reject if message is empty
     F->>Conv: get_conversation() or create_conversation()
     F->>Conv: add_message(role="user") — persisted BEFORE the LLM call

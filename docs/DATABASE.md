@@ -130,7 +130,7 @@ erDiagram
     CVES ||--o| CVE_AI_ANALYSIS : "analyzed as (no live FK — see §7)"
     ASSETS ||--o{ ALERTS : "triggers (live FK, ON DELETE SET NULL)"
     AI_CONVERSATIONS ||--o{ AI_MESSAGES : "contains (live FK, ON DELETE CASCADE)"
-    USERS ||..o{ AI_CONVERSATIONS : "owns, by username TEXT —\nnot a foreign key at all"
+    USERS ||..o{ AI_CONVERSATIONS : "owns, by username TEXT, not a foreign key at all"
 
     ASSETS {
         int id PK
@@ -688,7 +688,7 @@ sequenceDiagram
     U->>DB: UPDATE assets SET location/owner/criticality/... (edit)
     U->>DB: DELETE FROM matches WHERE asset_id=... (explicit app-level cleanup)
     U->>DB: DELETE FROM assets WHERE id=... (delete)
-    Note over DB: alerts.asset_id referencing this row\nis set to NULL automatically (live FK)
+    Note over DB: alerts.asset_id referencing this row<br/>is set to NULL automatically (live FK)
 ```
 
 ### 8.2 CVE lifecycle
@@ -704,7 +704,7 @@ sequenceDiagram
     alt is_stale(cve_id, description)
         S->>AI: queue_cve_for_analysis (cve_ai_analysis: pending)
     end
-    Note over DB: cves rows are never deleted by any code path —\nonce seen, permanent
+    Note over DB: cves rows are never deleted by any code path —<br/>once seen, permanent
 ```
 
 ### 8.3 Match (finding) lifecycle
@@ -721,7 +721,7 @@ sequenceDiagram
     User->>DB: UPDATE matches SET assigned_to/assigned_team=...
     User->>DB: UPDATE matches SET planned_patch_date/patch_notes=... (update_patch_plan)
     User->>DB: UPDATE matches SET patched = NOT patched (toggle_patched)
-    Note over DB: status='Resolved' also stamps resolved_at;\nany other status clears it
+    Note over DB: status='Resolved' also stamps resolved_at;<br/>any other status clears it
     User->>DB: DELETE FROM matches (only via /delete_asset's explicit cleanup)
 ```
 
@@ -1505,7 +1505,7 @@ sequenceDiagram
 
     U->>App: Add asset (vendor, product, version)
     App->>DB: INSERT INTO assets (...)
-    Note over DB: id=26, exposure defaults to 'Internal'\n(code-declared default; see §6.1 for the\nlive-vs-declared caveat on this specific column)
+    Note over DB: id=26, exposure defaults to 'Internal'<br/>(code-declared default; see §6.1 for the<br/>live-vs-declared caveat on this specific column)
 
     U->>App: Trigger scan
     App->>NVD: Keyword search + EPSS + KEV lookup
@@ -1513,7 +1513,7 @@ sequenceDiagram
     App->>DB: INSERT/UPDATE cves (upsert, per CVE)
     App->>App: calculate_risk(cvss, criticality, kev, epss_pct)
     App->>DB: INSERT INTO matches ... ON CONFLICT (asset_id, cve_id) DO UPDATE
-    Note over DB: No live FK validates asset_id/cve_id here —\nintegrity relies entirely on the application\nhaving just inserted/confirmed both parent rows itself
+    Note over DB: No live FK validates asset_id/cve_id here —<br/>integrity relies entirely on the application<br/>having just inserted/confirmed both parent rows itself
 
     App->>DB: is_stale(cve_id, description)?
     alt new or changed CVE
@@ -1551,11 +1551,11 @@ sequenceDiagram
     participant DB as PostgreSQL
 
     U->>App: POST /delete_asset/26
-    Note over App: Because matches.asset_id has\nNO live foreign key (§6.3, §7),\nthe application must clean up\nmanually, in the correct order,\nor risk orphaned rows
+    Note over App: Because matches.asset_id has<br/>NO live foreign key (§6.3, §7),<br/>the application must clean up<br/>manually, in the correct order,<br/>or risk orphaned rows
     App->>DB: DELETE FROM matches WHERE asset_id = 26
-    App->>DB: DELETE FROM alerts WHERE asset_id = 26 (redundant with the live\nON DELETE SET NULL, but explicit here anyway)
+    App->>DB: DELETE FROM alerts WHERE asset_id = 26 (redundant with the live<br/>ON DELETE SET NULL, but explicit here anyway)
     App->>DB: DELETE FROM assets WHERE id = 26
-    Note over DB: If this were interrupted between\nstep 1 and step 3, matches rows\nfor a still-existing asset_id=26\nwould simply remain — no database-level\nsafety net either way
+    Note over DB: If this were interrupted between<br/>step 1 and step 3, matches rows<br/>for a still-existing asset_id=26<br/>would simply remain — no database-level<br/>safety net either way
 ```
 
 ---
