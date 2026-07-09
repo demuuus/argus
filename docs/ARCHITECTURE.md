@@ -1,4 +1,8 @@
+<div align="center">
+
 # ARGUS System Architecture
+
+</div>
 
 This document is the technical blueprint of ARGUS: why it is designed the way it is, how its subsystems interact, how data flows through the platform, and how the current architecture would need to evolve to support the scale and capabilities described in the roadmap. It is written for architects, maintainers, contributors, security reviewers, and anyone evaluating ARGUS for deployment.
 
