@@ -1,6 +1,10 @@
+<div align="center">
+
 # ARGUS Installation Guide
 
 🌐 [English](INSTALL.md) | [Indonesia](INSTALL.id.md)
+
+</div>
 
 This document is the official installation and configuration manual for ARGUS. It covers everything needed to get a working ARGUS deployment running end to end: the PostgreSQL database, the Flask web dashboard, the Telegram bot, the background scheduler, and the AI Security Copilot.
 
