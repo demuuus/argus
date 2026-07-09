@@ -1,4 +1,8 @@
+<div align="center">
+
 # ARGUS Roadmap
+
+</div>
 
 This is ARGUS's strategic roadmap — where the project is today, what's realistically next, and where it's heading over a multi-release horizon. It is not a changelog, not release notes, and not a task tracker; it exists to give contributors, adopters, and evaluators an honest, technically-grounded picture of the project's direction.
 
