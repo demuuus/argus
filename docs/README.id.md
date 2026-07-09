@@ -4,6 +4,8 @@
 
 ### Platform Manajemen Kerentanan Berbantuan AI
 
+🌐 [English](README.md) | [Indonesia](README.id.md)
+
 *Lacak aset, korelasikan dengan data CVE/KEV/EPSS terkini, prioritaskan berdasarkan risiko yang dihitung, dan dapatkan analisis yang berbasis AI — melalui dashboard Flask atau bot Telegram.*
 
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)]()
