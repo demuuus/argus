@@ -1,4 +1,10 @@
+<div align="center">
+
 # Referensi API ARGUS
+
+🌐 [English](README.md) | [Indonesia](README.id.md)
+
+</div>
 
 Dokumen ini adalah referensi developer resmi untuk ARGUS. Dokumen ini mendokumentasikan setiap antarmuka yang diekspos platform — route Flask dashboard, JSON API internal yang dipanggil JavaScript dari route-route tersebut, command bot Telegram, API internal AI Security Copilot, lapisan abstraksi database, scanner, risk engine, subsistem reporting dan alerting, scheduler, dan setiap integrasi layanan eksternal.
 
