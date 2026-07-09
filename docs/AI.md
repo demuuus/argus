@@ -1,4 +1,8 @@
+<div align="center">
+
 # ARGUS AI Subsystem — Technical Reference
+
+</div>
 
 This document is the official technical reference for ARGUS's AI subsystem: the AI Security Copilot chat, the automated background CVE analysis pipeline, and everything underneath them — context assembly, prompt construction, memory, caching, and the LLM client itself. It is written for AI engineers, software architects, contributors, and security reviewers who need to understand how the AI subsystem actually works, not how a typical AI-powered platform is assumed to work.
 
