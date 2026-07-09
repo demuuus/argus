@@ -1,4 +1,8 @@
+<div align="center">
+
 # ARGUS API Reference
+
+</div>
 
 This document is the official developer reference for ARGUS. It documents every interface exposed by the platform — Flask dashboard routes, the internal JSON APIs those routes' JavaScript calls, Telegram bot commands, the AI Security Copilot's internal APIs, the database abstraction layer, the scanner, the risk engine, the reporting and alerting subsystems, the scheduler, and every external service integration.
 
