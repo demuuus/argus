@@ -1,5 +1,7 @@
 # ARGUS Installation Guide
 
+🌐 [English](INSTALL.md) | [Indonesia](INSTALL.id.md)
+
 This document is the official installation and configuration manual for ARGUS. It covers everything needed to get a working ARGUS deployment running end to end: the PostgreSQL database, the Flask web dashboard, the Telegram bot, the background scheduler, and the AI Security Copilot.
 
 **What gets installed.** A PostgreSQL database, a Python virtual environment with ARGUS's dependencies, the Flask dashboard process (`app.py`), optionally the Telegram bot process (`bot/main.py`), and — if you want AI features — a locally running OpenAI-compatible LLM server that ARGUS calls over HTTP.
