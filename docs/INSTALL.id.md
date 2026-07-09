@@ -1,6 +1,10 @@
+<div align="center">
+  
 # Panduan Instalasi ARGUS
 
 🌐 [English](INSTALL.md) | [Indonesia](INSTALL.id.md)
+
+</div>
 
 Dokumen ini adalah manual instalasi dan konfigurasi resmi untuk ARGUS. Dokumen ini mencakup semua yang diperlukan untuk menjalankan deployment ARGUS secara menyeluruh: basis data PostgreSQL, dashboard web Flask, bot Telegram, scheduler latar belakang, dan AI Security Copilot.
 
