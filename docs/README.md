@@ -453,7 +453,7 @@ The database schema does not need to be applied manually — both `app.py` and `
 | `AI.md` | AI Security Copilot design and prompt reference | [AI.md](AI.md) — see [§10](#10-ai-capabilities) |
 | `SECURITY.md` | Security model and responsible disclosure process | [SECURITY.md](SECURITY.md) — see [§11](#11-security-features) |
 | `DEPLOYMENT.md` | Containerized/production deployment | Not yet published — the `docker/` directory is currently a placeholder |
-| `ROADMAP.md` | Planned features and priorities | Not yet published — see [§17](#17-roadmap) |
+| `ROADMAP.md` | Planned features and priorities | [ROADMAP.md](ROADMAP.md) — see [§17](#17-roadmap) |
 
 The `docs/` directory in this repository is currently a placeholder; the sections above in this README are the authoritative documentation until these files are published.
 
