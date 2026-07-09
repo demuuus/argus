@@ -1,4 +1,10 @@
+<div align="center">
+
 # Arsitektur Sistem ARGUS
+
+🌐 [English](ARCHITECTURE.md) | [Indonesia](ARCHITECTURE.id.md)
+
+</div>
 
 Dokumen ini adalah cetak biru teknis ARGUS: mengapa sistem ini dirancang seperti sekarang, bagaimana subsistem-subsistemnya saling berinteraksi, bagaimana data mengalir melalui platform, dan bagaimana arsitektur saat ini perlu berevolusi untuk mendukung skala dan kemampuan yang dijelaskan pada roadmap. Dokumen ini ditulis untuk arsitek, maintainer, kontributor, peninjau keamanan, dan siapa pun yang mengevaluasi ARGUS untuk deployment.
 
