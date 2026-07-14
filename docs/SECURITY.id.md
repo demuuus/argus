@@ -1,4 +1,10 @@
+<div align="center">
+
 # Dokumentasi Keamanan ARGUS
+
+🌐 [English](SECURITY.md) | [Indonesia](SECURITY.id.md)
+
+</div>
 
 > **Catatan akurasi.** Setiap kontrol yang dideskripsikan dalam dokumen ini telah diverifikasi secara langsung terhadap source code ARGUS (`bot/dashboard/app.py`, `bot/database/`, `bot/Ai/`, `bot/scanner/`, `bot/nvd/`, `bot/kev/`, `bot/jobs/`, `bot/main.py`, `bot/handlers/`, `bot/database/schema.sql`) per revisi ini. Kontrol yang sudah diimplementasikan, praktik yang direkomendasikan, dan peningkatan yang direncanakan/masa depan dibedakan secara eksplisit dan konsisten di seluruh dokumen. Tidak ada satu pun di bawah ini yang mengklaim perlindungan yang sebenarnya tidak ada dalam basis kode.
 
