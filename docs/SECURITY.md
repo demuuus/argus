@@ -2,6 +2,8 @@
 
 # ARGUS Security Documentation
 
+🌐 [English](SECURITY.md) | [Indonesia](SECURITY.id.md)
+
 </div>
 
 > **Accuracy note.** Every control described in this document has been verified directly against the ARGUS source code (`bot/dashboard/app.py`, `bot/database/`, `bot/Ai/`, `bot/scanner/`, `bot/nvd/`, `bot/kev/`, `bot/jobs/`, `bot/main.py`, `bot/handlers/`, `bot/database/schema.sql`) as of this revision. Implemented controls, recommended practices, and planned/future enhancements are explicitly and consistently distinguished throughout. Nothing below claims a protection that is not actually present in the codebase.
