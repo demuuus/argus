@@ -2,6 +2,8 @@
 
 # ARGUS Database Architecture Reference
 
+🌐 [English](DATABASE.md) | [Indonesia](DATABASE.id.md)
+
 </div>
 
 This document is the official database architecture reference for ARGUS. It explains the schema's design, every table's purpose and lifecycle, relationships, indexing, performance, security, and migration strategy — and, critically, where the **actual deployed database** differs from what the schema-definition code (`schema.sql`, `bot/database/migrate.py`) declares.
