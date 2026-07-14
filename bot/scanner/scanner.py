@@ -32,8 +32,6 @@ from kev.clients import is_kev, _load_kev_ids
 
 logger = logging.getLogger(__name__)
 
-# Reused HTTP session for the EPSS API — same rationale as nvd/client.py:
-# avoid a fresh TCP+TLS handshake on every batch chunk during a scan.
 _epss_session = requests.Session()
 _epss_adapter = HTTPAdapter(pool_connections=2, pool_maxsize=4)
 _epss_session.mount("https://", _epss_adapter)
@@ -112,13 +110,6 @@ async def scan_asset(asset: dict) -> dict:
     if asset.get("search_keyword"):
         keyword = asset["search_keyword"].strip()
 
-    # The asset's own version is now passed through to get_cve_summary so
-    # matching is scoped to the exact version, the same authoritative
-    # CPE-based logic Live NVD Search uses. Previously this field was only
-    # ever displayed in the alert message -- it was never actually used to
-    # narrow the NVD query, so a scan matched an asset against every CVE
-    # for that vendor/product regardless of version, which is why "Scan
-    # All Assets" and "Live NVD Search" could disagree on the same product.
     version = (asset.get("version") or "").strip()
 
     logger.info("[scanner] asset_id=%s keyword='%s' version='%s'", asset['id'], keyword, version)
@@ -203,11 +194,7 @@ async def scan_asset(asset: dict) -> dict:
         )
         if is_new:
             result["new_findings"].append(enriched)
-            # Phase 6 Requirement 3: queue every newly-discovered CVE for AI
-            # analysis. queue_cve_for_analysis() checks the cache first and
-            # is a no-op if this CVE already has a fresh, complete analysis —
-            # it never blocks the scan (it only writes a 'pending' row; the
-            # actual LLM call happens later, in the analyzer's scheduler job).
+
             try:
                 from Ai.analyzer import queue_cve_for_analysis
                 await loop.run_in_executor(

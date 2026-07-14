@@ -2,10 +2,10 @@
 Argus PDF report generator.
 
 Produces a professionally formatted A4 PDF with:
-  - Header on every page (Argus logo-text + report title)
-  - Footer on every page (date + page numbers)
-  - Executive summary table
-  - Colour-coded findings table (KEV rows highlighted)
+- Header on every page (Argus logo-text + report title)
+- Footer on every page (date + page numbers)
+- Executive summary table
+- Colour-coded findings table (KEV rows highlighted)
 """
 
 import os
@@ -82,14 +82,12 @@ class ArgusDoc(BaseDocTemplate):
         super().__init__(filename, **kwargs)
         self.report_type     = report_type
         self.generation_date = generation_date
-        self.page_count      = 0   # 0 = "unknown yet" (probe pass); pre-set before final pass
+        self.page_count      = 0
         self._probe_mode     = True
 
     def handle_pageEnd(self):
         super().handle_pageEnd()
         if self._probe_mode:
-            # Probe pass: page_count starts at 0, so any pre-set value means
-            # this is the final pass and must not be overwritten.
             self.page_count = self.page
 
 
@@ -230,8 +228,8 @@ def _findings_table(findings):
         ("BOTTOMPADDING",  (0, 1), (-1, -1), 4),
         ("GRID",           (0, 0), (-1, -1), 0.4, BRAND_BORDER),
         ("WORDWRAP",       (0, 0), (-1, -1), True),
-        ("ALIGN",          (0, 1), (0, -1),  "CENTER"),  # # column
-        ("ALIGN",          (4, 1), (7, -1),  "CENTER"),  # CVSS/Severity/Risk/KEV
+        ("ALIGN",          (0, 1), (0, -1),  "CENTER"),
+        ("ALIGN",          (4, 1), (7, -1),  "CENTER"),
     ]
 
     # Highlight KEV rows in red
