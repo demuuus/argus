@@ -36,7 +36,7 @@ def record_today_snapshot() -> None:
                     SUM(CASE WHEN m.status = 'Resolved' THEN 1 ELSE 0 END) AS resolved_findings,
                     SUM(CASE WHEN c.kev = TRUE THEN 1 ELSE 0 END) AS kev_findings,
                     SUM(CASE WHEN m.status NOT IN ('Resolved','Accepted Risk','False Positive')
-                              AND m.due_date < CURRENT_DATE THEN 1 ELSE 0 END) AS overdue_findings,
+                    AND m.due_date < CURRENT_DATE THEN 1 ELSE 0 END) AS overdue_findings,
                     SUM(CASE WHEN UPPER(c.severity) = 'CRITICAL' THEN 1 ELSE 0 END) AS critical_findings,
                     SUM(CASE WHEN UPPER(c.severity) = 'HIGH' THEN 1 ELSE 0 END) AS high_findings,
                     AVG(m.risk_score) AS avg_risk_score,
@@ -72,8 +72,7 @@ def record_today_snapshot() -> None:
                         max_risk_score    = EXCLUDED.max_risk_score,
                         total_assets      = EXCLUDED.total_assets
                     """,
-                    (total or 0, open_f or 0, resolved or 0, kev or 0, overdue or 0,
-                     critical or 0, high or 0, avg_risk, max_risk, total_assets),
+                    (total or 0, open_f or 0, resolved or 0, kev or 0, overdue or 0, critical or 0, high or 0, avg_risk, max_risk, total_assets),
                 )
             logger.info("[risk_snapshots] Recorded snapshot for %s", date.today())
     finally:

@@ -32,12 +32,9 @@ NVD_API_KEY = os.getenv("NVD_API_KEY")
 
 _RETRYABLE_STATUSES = {429, 503}
 _MAX_RETRIES = 5
-_BACKOFF_BASE = 6    # seconds; doubles each attempt: 6, 12, 24, 48, 96
-_BACKOFF_CAP = 120   # never wait longer than this
+_BACKOFF_BASE = 6
+_BACKOFF_CAP = 120
 
-# Reused HTTP session with connection pooling and keep-alive -- same
-# rationale as nvd/client.py's session: avoid a fresh TCP+TLS handshake on
-# every one of the many calls a full asset scan makes.
 _session = requests.Session()
 _adapter = HTTPAdapter(pool_connections=4, pool_maxsize=10)
 _session.mount("https://", _adapter)
@@ -115,8 +112,4 @@ def get(url: str, timeout=(10, 90)):
         )
         time.sleep(wait)
 
-    # Exhausted all retries. If we got a response at all (even a
-    # still-429/503 one), return it so the caller sees a normal
-    # .ok == False / .status_code -- better than surfacing None for a case
-    # that isn't actually "no response ever came back".
     return last_response

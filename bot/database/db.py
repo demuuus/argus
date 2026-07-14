@@ -110,10 +110,8 @@ class _PooledConnection:
         object.__setattr__(self, "_returned", True)
         try:
             if self._conn.closed:
-                # Connection already dead — drop it instead of pooling it.
                 self._pool.putconn(self._conn, close=True)
             else:
-                # Defensive: never return a connection mid-transaction.
                 if self._conn.status != psycopg2.extensions.STATUS_READY:
                     try:
                         self._conn.rollback()

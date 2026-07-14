@@ -14,28 +14,13 @@ from database.db import get_connection
 
 # ── Core schema migrations (original) ────────────────────────────────────────
 MIGRATIONS = [
-    ("assets.type column",
-     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'Unknown'"),
-    ("assets.last_scan column",
-     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS last_scan TIMESTAMPTZ"),
-    ("assets.search_keyword column",
-     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS search_keyword TEXT"),
-    ("cves.severity column",
-     "ALTER TABLE cves ADD COLUMN IF NOT EXISTS severity TEXT"),
-    ("cves.epss column",
-     "ALTER TABLE cves ADD COLUMN IF NOT EXISTS epss NUMERIC(8,6)"),
-    ("cves.epss_percentile column",
-     "ALTER TABLE cves ADD COLUMN IF NOT EXISTS epss_percentile NUMERIC(8,6)"),
-    # schema.sql's CREATE TABLE cves defines created_at, but the live
-    # database's cves table pre-dates that column (CREATE TABLE IF NOT
-    # EXISTS is a no-op against the already-existing table, so it never got
-    # added). Without this repair, any query selecting created_at from
-    # cves -- e.g. database/cves.py's get_cve() -- fails with
-    # 'column "created_at" does not exist', which is exactly what caused
-    # the scheduler/analyzer errors ("Failed to fetch CVE", "Unexpected
-    # error analyzing CVE-...").
-    ("cves.created_at column",
-     "ALTER TABLE cves ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
+    ("assets.type column", "ALTER TABLE assets ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'Unknown'"),
+    ("assets.last_scan column", "ALTER TABLE assets ADD COLUMN IF NOT EXISTS last_scan TIMESTAMPTZ"),
+    ("assets.search_keyword column", "ALTER TABLE assets ADD COLUMN IF NOT EXISTS search_keyword TEXT"),
+    ("cves.severity column", "ALTER TABLE cves ADD COLUMN IF NOT EXISTS severity TEXT"),
+    ("cves.epss column", "ALTER TABLE cves ADD COLUMN IF NOT EXISTS epss NUMERIC(8,6)"),
+    ("cves.epss_percentile column", "ALTER TABLE cves ADD COLUMN IF NOT EXISTS epss_percentile NUMERIC(8,6)"),
+    ("cves.created_at column", "ALTER TABLE cves ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
     ("matches UNIQUE (asset_id, cve_id) constraint",
      """
      DO $$
@@ -49,8 +34,7 @@ MIGRATIONS = [
          END IF;
      END $$
      """),
-    ("matches.first_seen column",
-     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS first_seen TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
+    ("matches.first_seen column", "ALTER TABLE matches ADD COLUMN IF NOT EXISTS first_seen TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
 
     # ── Phase 2: Remediation tracking ────────────────────────────────────────
     ("matches.status column",
@@ -124,10 +108,6 @@ MIGRATIONS = [
     ("index matches(status)",     "CREATE INDEX IF NOT EXISTS idx_matches_status ON matches(status)"),
     ("index matches(due_date)",   "CREATE INDEX IF NOT EXISTS idx_matches_due_date ON matches(due_date)"),
     ("index assets(type)",        "CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(type)"),
-    # cves.kev and cves.cvss are filtered/sorted on heavily by app.py
-    # (/findings KEV filter and CVSS sort, /cves live search sort,
-    # dashboard KEV counts) but had no supporting index, forcing a
-    # sequential scan of the entire cves table on every such query.
     ("index cves(kev) partial",   "CREATE INDEX IF NOT EXISTS idx_cves_kev ON cves(kev) WHERE kev = TRUE"),
     ("index cves(cvss)",          "CREATE INDEX IF NOT EXISTS idx_cves_cvss ON cves(cvss DESC)"),
 
@@ -148,12 +128,6 @@ MIGRATIONS = [
      "UPDATE assets SET search_keyword = vendor || ' ' || product WHERE search_keyword IS NULL"),
 
     # ── Phase 6: AI Security Copilot — persistent conversations ───────────────
-    # NOTE: an earlier ad-hoc setup created ai_conversations/ai_messages with a
-    # different shape (user_id INTEGER instead of username TEXT, no
-    # updated_at/archived/tokens columns). CREATE TABLE IF NOT EXISTS silently
-    # no-ops against that pre-existing table, so the ALTER TABLE ... ADD COLUMN
-    # IF NOT EXISTS statements below are what actually repair a live database —
-    # they are required even though the CREATE TABLE above also defines them.
     ("ai_conversations table",
      """
      CREATE TABLE IF NOT EXISTS ai_conversations (
@@ -165,18 +139,10 @@ MIGRATIONS = [
          archived    BOOLEAN     NOT NULL DEFAULT FALSE
      )
      """),
-    ("repair ai_conversations.username column",
-     # username must be nullable here (no DEFAULT can backfill a real
-     # username for legacy rows); the application always supplies one on
-     # INSERT, so existing/legacy rows are the only ones that could be
-     # NULL, and there are none in this deployment.
-     "ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS username TEXT"),
-    ("repair ai_conversations.updated_at column",
-     "ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
-    ("repair ai_conversations.archived column",
-     "ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE"),
-    ("backfill ai_conversations.title default",
-     "ALTER TABLE ai_conversations ALTER COLUMN title SET DEFAULT 'New conversation'"),
+    ("repair ai_conversations.username column", "ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS username TEXT"),
+    ("repair ai_conversations.updated_at column", "ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
+    ("repair ai_conversations.archived column", "ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("backfill ai_conversations.title default", "ALTER TABLE ai_conversations ALTER COLUMN title SET DEFAULT 'New conversation'"),
     ("ai_messages table",
      """
      CREATE TABLE IF NOT EXISTS ai_messages (
@@ -188,21 +154,8 @@ MIGRATIONS = [
          created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
      )
      """),
-    ("repair ai_messages.tokens column",
-     "ALTER TABLE ai_messages ADD COLUMN IF NOT EXISTS tokens INTEGER DEFAULT 0"),
+    ("repair ai_messages.tokens column", "ALTER TABLE ai_messages ADD COLUMN IF NOT EXISTS tokens INTEGER DEFAULT 0"),
 
-    # CRITICAL REPAIR: ai_messages.conversation_id was supposed to have
-    # REFERENCES ai_conversations(id) ON DELETE CASCADE, but because
-    # ai_messages already existed (with a different shape) when this table
-    # was first defined, CREATE TABLE IF NOT EXISTS silently skipped that FK
-    # along with everything else. Without it, deleting a conversation
-    # (database.conversations.delete_conversation) never cascades to its
-    # messages — they become permanently orphaned, referencing a
-    # conversation_id that no longer exists in ai_conversations. This is
-    # exactly the corruption pattern observed in production (ai_messages
-    # rows for conversation_id 1 and 2 with zero matching ai_conversations
-    # rows). Two steps: delete the existing orphans (Postgres refuses to
-    # add a FK while violating rows exist), then add the FK for real.
     ("delete orphaned ai_messages with no matching conversation",
      """
      DELETE FROM ai_messages
@@ -223,17 +176,10 @@ MIGRATIONS = [
          END IF;
      END $$
      """),
-    ("index ai_conversations(username)",
-     "CREATE INDEX IF NOT EXISTS idx_ai_conversations_username ON ai_conversations(username, updated_at DESC)"),
-    ("index ai_messages(conversation_id)",
-     "CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation ON ai_messages(conversation_id, created_at)"),
+    ("index ai_conversations(username)", "CREATE INDEX IF NOT EXISTS idx_ai_conversations_username ON ai_conversations(username, updated_at DESC)"),
+    ("index ai_messages(conversation_id)", "CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation ON ai_messages(conversation_id, created_at)"),
 
     # ── Phase 6: AI Security Copilot — CVE analysis cache ──────────────────────
-    # Same situation: an earlier minimal cve_ai_analysis table already exists
-    # in production with only (cve_id, summary, explanation, guidance,
-    # attack_scenario, business_impact, analyzed_at, model_used) — missing
-    # technical_impact, recommended_actions, description_hash, status,
-    # retry_count, error_message, created_at, updated_at. Repaired below.
     ("cve_ai_analysis table",
      """
      CREATE TABLE IF NOT EXISTS cve_ai_analysis (
@@ -255,25 +201,14 @@ MIGRATIONS = [
          updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
      )
      """),
-    ("repair cve_ai_analysis.technical_impact column",
-     "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS technical_impact TEXT"),
-    ("repair cve_ai_analysis.recommended_actions column",
-     "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS recommended_actions TEXT"),
-    ("repair cve_ai_analysis.description_hash column",
-     "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS description_hash TEXT"),
-    ("repair cve_ai_analysis.status column",
-     "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending'"),
-    ("repair cve_ai_analysis.retry_count column",
-     "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0"),
-    ("repair cve_ai_analysis.error_message column",
-     "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS error_message TEXT"),
-    ("repair cve_ai_analysis.created_at column",
-     "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
-    ("repair cve_ai_analysis.updated_at column",
-     "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
-    # The status CHECK constraint is added separately (and defensively) because
-    # ADD COLUMN with an inline CHECK fails on tables that already have rows
-    # violating it; this guards the same way even though there are no rows yet.
+    ("repair cve_ai_analysis.technical_impact column", "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS technical_impact TEXT"),
+    ("repair cve_ai_analysis.recommended_actions column", "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS recommended_actions TEXT"),
+    ("repair cve_ai_analysis.description_hash column", "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS description_hash TEXT"),
+    ("repair cve_ai_analysis.status column", "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending'"),
+    ("repair cve_ai_analysis.retry_count column", "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0"),
+    ("repair cve_ai_analysis.error_message column", "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS error_message TEXT"),
+    ("repair cve_ai_analysis.created_at column", "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
+    ("repair cve_ai_analysis.updated_at column", "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
     ("add cve_ai_analysis.status CHECK constraint",
      """
      DO $$
@@ -287,16 +222,8 @@ MIGRATIONS = [
          END IF;
      END $$
      """),
-    ("index cve_ai_analysis(status)",
-     "CREATE INDEX IF NOT EXISTS idx_cve_ai_analysis_status ON cve_ai_analysis(status)"),
+    ("index cve_ai_analysis(status)", "CREATE INDEX IF NOT EXISTS idx_cve_ai_analysis_status ON cve_ai_analysis(status)"),
 
-    # ── Phase 6 Requirement 5: trend analysis ("how does this week compare
-    # to last week") needs a historical record, since `matches` only holds
-    # current state — there was previously no way to answer that question
-    # at all. risk_snapshots stores one row per day with aggregate counts,
-    # written by a daily APScheduler job (see jobs/daily_scan.py). Storing
-    # pre-aggregated daily totals (not a full table dump) keeps this table
-    # small forever — one row/day means ~365 rows/year, trivial to query.
     ("risk_snapshots table",
      """
      CREATE TABLE IF NOT EXISTS risk_snapshots (
@@ -318,12 +245,6 @@ MIGRATIONS = [
     ("index risk_snapshots(snapshot_date)",
      "CREATE INDEX IF NOT EXISTS idx_risk_snapshots_date ON risk_snapshots(snapshot_date DESC)"),
 
-    # ── Phase 6 Requirement 8: chat response cache ─────────────────────────────
-    # Keyed on a hash of (normalized question text + ARGUS context), not just
-    # the raw question, so the cache auto-invalidates whenever the underlying
-    # ARGUS data changes (new scan results, new AI analysis, etc.) without
-    # needing any manual cache-busting logic. A short TTL is still enforced
-    # as a safety net against staleness even when the hash happens to repeat.
     ("ai_response_cache table",
      """
      CREATE TABLE IF NOT EXISTS ai_response_cache (
@@ -340,11 +261,6 @@ MIGRATIONS = [
      "CREATE INDEX IF NOT EXISTS idx_ai_response_cache_expires ON ai_response_cache(expires_at)"),
 
     # ── City Exposure Overview feature ─────────────────────────────────────────
-    # Nullable on purpose: existing assets have no city/country data and must
-    # keep working unmodified (the feature spec explicitly requires this —
-    # "do not force old records to be updated immediately"). NULL/blank city
-    # is the documented "unassigned asset" case throughout this feature, not
-    # an error state.
     ("assets.city column",
      "ALTER TABLE assets ADD COLUMN IF NOT EXISTS city VARCHAR(120)"),
     ("assets.country_code column",
@@ -353,17 +269,7 @@ MIGRATIONS = [
      "CREATE INDEX IF NOT EXISTS idx_assets_city_country ON assets (country_code, city)"),
 
     # ── Asset metadata: exposure & network function ─────────────────────────────
-    # exposure defaults to 'Internal' rather than NULL — every asset has a
-    # real exposure state whether or not it's been reviewed yet, and
-    # 'Internal' is the safer default to pre-select (an admin has to
-    # actively mark something 'External', rather than an unreviewed asset
-    # silently reading as external-safe). function stays nullable — unlike
-    # exposure, "unclassified network role" is a legitimate, common state
-    # (many assets genuinely don't fit Gateway/Endpoint/etc.) and forcing a
-    # default here would misrepresent asset data rather than just being
-    # conservative about it.
-    ("assets.exposure column",
-     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS exposure TEXT NOT NULL DEFAULT 'Internal'"),
+    ("assets.exposure column", "ALTER TABLE assets ADD COLUMN IF NOT EXISTS exposure TEXT NOT NULL DEFAULT 'Internal'"),
     ("assets.exposure check constraint",
      """
      DO $$
@@ -377,28 +283,14 @@ MIGRATIONS = [
          END IF;
      END $$;
      """),
-    ("assets.function column",
-     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS function TEXT"),
-    ("index assets(exposure)",
-     "CREATE INDEX IF NOT EXISTS idx_assets_exposure ON assets (exposure)"),
-    ("index assets(function)",
-     "CREATE INDEX IF NOT EXISTS idx_assets_function ON assets (function)"),
+    ("assets.function column", "ALTER TABLE assets ADD COLUMN IF NOT EXISTS function TEXT"),
+    ("index assets(exposure)", "CREATE INDEX IF NOT EXISTS idx_assets_exposure ON assets (exposure)"),
+    ("index assets(function)", "CREATE INDEX IF NOT EXISTS idx_assets_function ON assets (function)"),
 
     # ── Patch planning (per-finding) ─────────────────────────────────────────────
-    # Deliberately separate from matches.due_date: due_date is the
-    # auto-calculated SLA compliance deadline (see database/matches.py's
-    # _calc_due_date — derived purely from CVSS, not something an analyst
-    # sets). planned_patch_date is the analyst's own scheduling decision —
-    # when they actually intend to apply the patch, which may be before or
-    # after the SLA deadline (e.g. tied to a maintenance window) and is
-    # never auto-computed or overwritten by ARGUS. Both are shown
-    # side-by-side rather than one replacing the other.
-    ("matches.planned_patch_date column",
-     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS planned_patch_date DATE"),
-    ("matches.patch_notes column",
-     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS patch_notes TEXT"),
-    ("index matches(planned_patch_date)",
-     "CREATE INDEX IF NOT EXISTS idx_matches_planned_patch_date ON matches (planned_patch_date)"),
+    ("matches.planned_patch_date column", "ALTER TABLE matches ADD COLUMN IF NOT EXISTS planned_patch_date DATE"),
+    ("matches.patch_notes column", "ALTER TABLE matches ADD COLUMN IF NOT EXISTS patch_notes TEXT"),
+    ("index matches(planned_patch_date)", "CREATE INDEX IF NOT EXISTS idx_matches_planned_patch_date ON matches (planned_patch_date)"),
 ]
 
 
@@ -432,16 +324,6 @@ def run_ai_views():
 
     conn = get_connection()
     try:
-        # Extract only real CREATE OR REPLACE VIEW statements. Anchoring on
-        # `VIEW\s+\w+\s+AS` (not just the bare phrase) is deliberate: a
-        # previous version of this regex matched the literal text
-        # "CREATE OR REPLACE VIEW" anywhere, including inside an SQL
-        # comment that *mentioned* the phrase as prose (schema.sql had a
-        # comment explaining a column-mismatch risk that contained those
-        # exact words) — that silently produced a malformed statement
-        # (comment text + the real view glued together) which failed to
-        # execute, so ai_dashboard was never actually refreshed by this
-        # function even though it looked successful in isolation.
         import re
         view_statements = re.findall(
             r"CREATE OR REPLACE VIEW\s+\w+\s+AS[\s\S]+?;",

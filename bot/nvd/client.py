@@ -20,22 +20,14 @@ NVD_API_KEY = os.getenv("NVD_API_KEY")
 BASE_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 TIMEOUT = 30
 
-# Retry configuration for transient NVD errors (429, 503)
 _RETRYABLE_STATUSES = {429, 503}
 _MAX_RETRIES = 5
-_BACKOFF_BASE = 6   # seconds; doubles each attempt: 6, 12, 24, 48, 96
-_BACKOFF_CAP  = 120 # never wait longer than this
+_BACKOFF_BASE = 6
+_BACKOFF_CAP  = 120
 
 # Initialize logging
 logger = logging.getLogger(__name__)
 
-# Reused HTTP session with connection pooling and keep-alive. A single
-# asset scan can page through dozens of NVD calls (100 results/page); a
-# full sync across many assets makes hundreds more. Without a shared
-# session, every single call pays a fresh TCP+TLS handshake — a real,
-# measurable latency cost that compounds at "continuous 24/7 sync" scale.
-# pool_maxsize matches the scanner's NVD concurrency cap (see
-# scanner.py's _NVD_CONCURRENCY) plus headroom for the health-check call.
 _session = requests.Session()
 _adapter = HTTPAdapter(pool_connections=4, pool_maxsize=10)
 _session.mount("https://", _adapter)
@@ -206,14 +198,8 @@ def get_cve_summary(keyword: str, version: str | None = None) -> List[Dict]:
     The scanner is responsible for recording that failure as a scan error.
     """
     if version:
-        # Caller (the scanner) already knows the exact version separately --
-        # go straight to the authoritative product+version lookup, no
-        # free-text parsing of `keyword` needed or wanted.
         vulnerabilities, note, error = get_cves_for_product(keyword, version)
     else:
-        # No version given: treat `keyword` as free text, exactly like Live
-        # NVD Search does -- recognizes a literal CVE ID, or a trailing
-        # 'Product 1.2.3' version embedded in the string itself.
         vulnerabilities, note, error = get_cves_for_query(keyword)
 
     if error is not None:
@@ -231,7 +217,6 @@ def get_cve_summary(keyword: str, version: str | None = None) -> List[Dict]:
         cve = item.get("cve", {})
         cve_id = cve.get("id")
 
-        # Ignore malformed NVD entries instead of crashing the entire asset scan.
         if not cve_id:
             logger.warning( "[NVD] Skipping malformed vulnerability entry for keyword='%s': missing CVE ID", keyword,)
             continue

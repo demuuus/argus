@@ -1,25 +1,3 @@
-/* date_input.js
- *
- * Replaces bare <input type="date"> for the Patch Planning date fields.
- *
- * Why: <input type="date">'s displayed segment order (mm/dd/yyyy vs
- * dd/mm/yyyy) is controlled entirely by the browser/OS locale, not by
- * this app — so it silently showed US mm/dd/yyyy regardless of the
- * analyst's actual locale (Indonesia uses DD/MM/YYYY). Its per-segment
- * typing UX also made it easy to end up with a garbage year (e.g. "0002")
- * if a keystroke landed in the wrong segment for what the user expected.
- *
- * This component always displays and accepts DD/MM/YYYY text, always
- * submits the same ISO yyyy-mm-dd value the backend already expects (see
- * dashboard/app.py's update_patch_plan route), and never submits a
- * partial or invalid date — the visible text field only writes to the
- * hidden submitted field once the typed date is confirmed valid.
- *
- * No external dependencies (no CDN) — self-contained, consistent with
- * this project's existing static/js files (city_map.js, charts.js) and
- * safer for restricted/air-gapped deployments than pulling in a
- * third-party date-picker library.
- */
 (function () {
   "use strict";
 
@@ -28,11 +6,10 @@
     "July", "August", "September", "October", "November", "December",
   ];
 
-  function daysInMonth(year, month /* 1-12 */) {
+  function daysInMonth(year, month) {
     return new Date(year, month, 0).getDate();
   }
 
-  /** "31/03/2026" -> {y:2026,m:3,d:31} if a real calendar date, else null. */
   function parseDMY(text) {
     const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec((text || "").trim());
     if (!m) return null;
@@ -50,20 +27,14 @@
   function toDMY(y, m, d) { return `${pad2(d)}/${pad2(m)}/${y}`; }
   function toISO(y, m, d) { return `${y}-${pad2(m)}-${pad2(d)}`; }
 
-  /** "2026-03-31" -> {y,m,d} (ISO is always well-formed here — it only
-   *  ever comes from our own hidden field, populated server-side or by
-   *  this same script). */
   function parseISO(text) {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((text || "").trim());
     if (!m) return null;
     return { y: parseInt(m[1], 10), m: parseInt(m[2], 10), d: parseInt(m[3], 10) };
   }
 
-  /** Auto-insert '/' separators as the user types digits, capping each
-   *  segment (2/2/4 digits) so a stray keystroke can't run past the year
-   *  segment and corrupt a later one. Returns the re-masked string. */
   function maskInput(raw, previous) {
-    const digitsOnly = raw.replace(/[^\d]/g, "").slice(0, 8); // dd mm yyyy = 8 digits max
+    const digitsOnly = raw.replace(/[^\d]/g, "").slice(0, 8);
     let out = "";
     if (digitsOnly.length > 0) out += digitsOnly.slice(0, 2);
     if (digitsOnly.length > 2) out += "/" + digitsOnly.slice(2, 4);
@@ -81,17 +52,11 @@
       this.popup = root.querySelector(".date-field-calendar");
       this.autosubmit = root.dataset.autosubmit === "true";
 
-      // The ISO hidden field is the source of truth. If the visible text
-      // field wasn't already pre-populated (the macro that renders this
-      // component does populate it server-side, but this class shouldn't
-      // *depend* on that — anything else constructing this markup should
-      // still get a correct initial display), derive DD/MM/YYYY from it.
       const initial = parseISO(this.iso.value);
       if (initial && !this.text.value.trim()) {
         this.text.value = toDMY(initial.y, initial.m, initial.d);
       }
 
-      // View month/year the popup calendar is currently showing.
       const viewBase = initial || this._today();
       this.viewYear = viewBase.y;
       this.viewMonth = viewBase.m;
@@ -144,11 +109,6 @@
       this.root.setAttribute("title", msg);
     }
 
-    /** Called on blur/Enter from the typed text field. Empty text clears
-     *  the planned date (a legitimate action — "not scheduled yet"). A
-     *  non-empty value must parse as a real calendar date or nothing is
-     *  submitted and the field is flagged, so a bad date never reaches
-     *  the server. */
     _commitTyped() {
       const raw = this.text.value.trim();
       if (raw === "") {
@@ -175,9 +135,6 @@
       }
     }
 
-    /** Repopulate this field with a new value (or clear it with "" / null).
-     *  Used when one date-field instance lives inside a shared modal and
-     *  gets reused for whichever row's "Edit" button was just clicked. */
     setValue(iso) {
       const parsed = iso ? parseISO(iso) : null;
       if (parsed) {
@@ -289,8 +246,5 @@
     init();
   }
 
-  // Findings/asset tables can inject new rows without a full page reload
-  // in a couple of places elsewhere in this app — re-scan lazily rather
-  // than assuming this file is the only thing that ever touches the DOM.
   window.ArgusDateInput = { init: init };
 })();

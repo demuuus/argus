@@ -72,8 +72,7 @@ def get_cve(cve_id: str) -> dict:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     """
-                    SELECT cve_id, cvss, severity, kev, published,
-                           description, created_at, epss, epss_percentile
+                    SELECT cve_id, cvss, severity, kev, published, description, created_at, epss, epss_percentile
                     FROM cves
                     WHERE cve_id = %s
                     """,

@@ -40,19 +40,6 @@ breaking template JSON serialization.
 from types import MappingProxyType
 from typing import Optional
 
-# ── Approved country -> city list ────────────────────────────────────────────
-# This is the single source of truth for every country/city dropdown and
-# every server-side validation check in the City Exposure feature. Add new
-# entries here (and a matching entry in CITY_COORDINATES below, if you want
-# the city to appear on the map) to expand supported locations.
-#
-# Read-only in effect: not a MappingProxyType (see module docstring — this
-# object is serialized directly via Jinja's `| tojson` in several
-# templates, which cannot handle MappingProxyType), but each "cities"
-# list is a tuple, and the actual validation logic below never reads this
-# structure directly — it uses _VALID_COUNTRY_CITY_PAIRS, a frozenset
-# derived from it once at import time, so the allowlist enforced by
-# is_valid_city() cannot be corrupted even if this dict were mutated.
 SUPPORTED_LOCATIONS = {
     "IN": {
         "name": "India",
@@ -64,28 +51,12 @@ SUPPORTED_LOCATIONS = {
     },
 }
 
-# O(1) membership set derived once at import time from SUPPORTED_LOCATIONS,
-# instead of is_valid_city() doing a linear scan of a per-country list on
-# every call. is_valid_city() is on the request path for /assets, /findings,
-# /add_asset, and /edit_asset, so this turns a repeated O(n) scan (small n,
-# but non-zero on every request) into a single O(1) hash lookup.
 _VALID_COUNTRY_CITY_PAIRS = frozenset(
     (country_code, city)
     for country_code, entry in SUPPORTED_LOCATIONS.items()
     for city in entry["cities"]
 )
 
-# ── City-centroid coordinates (NOT precise asset locations) ─────────────────
-# Keyed on (country_code, city) so identically-named cities in different
-# countries never collide (e.g. there could be a "Singapore" city entry
-# elsewhere with a different country_code in a future expansion).
-#
-# A city can exist in SUPPORTED_LOCATIONS without an entry here - that is
-# the expected/handled "Unmapped" case (still shown in the exposure table,
-# never on the map, never silently dropped). Do not assume every approved
-# city has a coordinate.
-#
-# Read-only: MappingProxyType, same rationale as SUPPORTED_LOCATIONS above.
 CITY_COORDINATES = MappingProxyType({
     ("IN", "New Delhi"):  MappingProxyType({"lat": 28.6139, "lng": 77.2090}),
     ("IN", "Mumbai"):     MappingProxyType({"lat": 19.0760, "lng": 72.8777}),
@@ -95,9 +66,6 @@ CITY_COORDINATES = MappingProxyType({
     ("ID", "Jakarta"):    MappingProxyType({"lat": -6.2088, "lng": 106.8456}),
     ("ID", "Surabaya"):   MappingProxyType({"lat": -7.2575, "lng": 112.7521}),
     ("ID", "Bandung"):    MappingProxyType({"lat": -6.9175, "lng": 107.6191}),
-    # "Medan", "Manchester", "Birmingham" are deliberately left without a
-    # centroid here to exercise/demonstrate the "Unmapped" path end-to-end -
-    # add coordinates for them whenever real centroids are available.
 })
 
 
@@ -170,12 +138,6 @@ def classify_risk_level(max_risk_score: int, kev_count: int) -> str:
         return "Medium"
     return "Low"
 
-
-# Display colors for each risk level, used by both the map markers and the
-# exposure table badges so the two views are always visually consistent
-# with each other and with the rest of ARGUS's existing badge styling.
-#
-# Read-only for the same reason as SUPPORTED_LOCATIONS/CITY_COORDINATES.
 RISK_LEVEL_COLORS = MappingProxyType({
     "Critical": "#f75f5f",
     "High":     "#f7a14f",

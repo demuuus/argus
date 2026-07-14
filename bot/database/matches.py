@@ -203,9 +203,7 @@ def update_match_assignment(asset_id: int, cve_id: str,
 _ASSIGNED_TO_UNSET = object()
 
 
-def update_patch_plan(asset_id: int, cve_id: str,
-                       planned_patch_date, patch_notes: str,
-                       assigned_to=_ASSIGNED_TO_UNSET) -> None:
+def update_patch_plan(asset_id: int, cve_id: str, planned_patch_date, patch_notes: str, assigned_to=_ASSIGNED_TO_UNSET) -> None:
     """
     Set/clear the planned patch date and scheduling notes for a finding.
 

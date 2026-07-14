@@ -7,27 +7,14 @@ VALID_TYPES = {
     "NAS", "WAP", "PLC", "Unknown",
 }
 
-# Exposure: whether the asset is reachable from outside the organization's
-# network. Binary and low-cardinality, so also enforced with a DB CHECK
-# constraint (see database/migrate.py) as defense-in-depth — matching how
-# matches.status is handled elsewhere in this schema.
 VALID_EXPOSURES = {"Internal", "External"}
-
-# Network function/role: what the asset DOES on the network, as distinct
-# from its device category (`type`, e.g. "Firewall"/"Server"). A Firewall
-# functions as a Gateway; a Workstation functions as an Endpoint — type
-# and function are independent axes and both are useful for filtering.
-# No DB CHECK constraint (unlike exposure): this list is more likely to
-# grow over time, and type follows the same Python-only-validation
-# precedent for the same reason.
 VALID_FUNCTIONS = {
     "Gateway", "Endpoint", "Internal Server", "DMZ Host",
     "Load Balancer", "Jump Host", "Management", "Unknown",
 }
 
 
-def add_asset(vendor, product, version, asset_type="Unknown", search_keyword=None,
-              city=None, country_code=None, exposure="Internal", function=None):
+def add_asset(vendor, product, version, asset_type="Unknown", search_keyword=None, city=None, country_code=None, exposure="Internal", function=None):
     """Insert a new asset and return its assigned ID.
 
     city/country_code are validated server-side against SUPPORTED_LOCATIONS
@@ -47,7 +34,6 @@ def add_asset(vendor, product, version, asset_type="Unknown", search_keyword=Non
     asset_type = asset_type if asset_type in VALID_TYPES else "Unknown"
     exposure = exposure if exposure in VALID_EXPOSURES else "Internal"
     function = function if function in VALID_FUNCTIONS else None
-    # Default search_keyword to "vendor product" if not provided
     if not search_keyword:
         search_keyword = f"{vendor} {product}"
 
@@ -140,9 +126,7 @@ def remove_asset(asset_id):
         conn.close()
 
 
-def update_asset(asset_id, location, owner, criticality, notes, asset_type=None,
-                  search_keyword=None, city=None, country_code=None,
-                  exposure=None, function=None):
+def update_asset(asset_id, location, owner, criticality, notes, asset_type=None, search_keyword=None, city=None, country_code=None, exposure=None, function=None):
     """Update editable fields on an asset.
 
     city/country_code follow the same server-side validation as add_asset():
@@ -171,9 +155,7 @@ def update_asset(asset_id, location, owner, criticality, notes, asset_type=None,
     if not is_valid_city(country_code, city):
         city, country_code = None, None
 
-    set_clauses = ["location = %s", "owner = %s", "criticality = %s",
-                   "notes = %s", "search_keyword = %s",
-                   "city = %s", "country_code = %s"]
+    set_clauses = ["location = %s", "owner = %s", "criticality = %s", "notes = %s", "search_keyword = %s", "city = %s", "country_code = %s"]
     params = [location, owner, criticality, notes, search_keyword, city, country_code]
 
     if asset_type is not None:
@@ -224,12 +206,9 @@ def get_city_exposure_summary():
 
     Uses the REAL ARGUS schema (confirmed against the live database, not
     assumed from the feature spec's example):
-        - cves.kev is the actual KEV boolean column (spec example used the
-          placeholder name "is_kev", which does not exist in this project).
-        - matches.id is the real findings primary key (one row per
-          asset-CVE relationship) — there is no separate "findings" table.
-        - matches.cve_id is TEXT, joined directly to cves.cve_id (also
-          TEXT) — there is no separate numeric CVE id.
+        - cves.kev is the actual KEV boolean column (spec example used the placeholder name "is_kev", which does not exist in this project).
+        - matches.id is the real findings primary key (one row per asset-CVE relationship) — there is no separate "findings" table.
+        - matches.cve_id is TEXT, joined directly to cves.cve_id (also TEXT) — there is no separate numeric CVE id.
 
     COUNT(DISTINCT ...) is used throughout specifically so that one CVE
     matched to many assets in the same city counts as ONE unique CVE but
@@ -261,8 +240,8 @@ def get_city_exposure_summary():
                 LEFT JOIN matches m ON m.asset_id = a.id
                 LEFT JOIN cves c ON c.cve_id = m.cve_id
                 WHERE a.city IS NOT NULL
-                  AND TRIM(a.city) <> ''
-                  AND a.country_code IS NOT NULL
+                AND TRIM(a.city) <> ''
+                AND a.country_code IS NOT NULL
                 GROUP BY a.country_code, a.city
                 ORDER BY max_risk_score DESC, finding_count DESC, asset_count DESC
                 """
@@ -297,21 +276,12 @@ def get_patch_plan(scope="scheduled"):
     Patch Planning view: one row per open finding, for scheduling.
 
     scope:
-        "scheduled"   — only findings with a planned_patch_date set,
-                        ordered soonest-first (the default "what's coming
-                        up" view).
-        "unscheduled" — open findings with NO planned_patch_date yet,
-                        ordered by risk_score desc (highest-risk findings
-                        that still need a patch date assigned, surfaced
-                        first).
-        "all"         — every open finding regardless of whether it has
-                        a planned date, scheduled ones first (by date),
-                        then unscheduled ones (by risk).
+        "scheduled"   — only findings with a planned_patch_date set, ordered soonest-first (the default "what's coming up" view).
+        "unscheduled" — open findings with NO planned_patch_date yet, ordered by risk_score desc (highest-risk findings that still need a patch date assigned, surfaced first).
+        "all"         — every open finding regardless of whether it has a planned date, scheduled ones first (by date), then unscheduled ones (by risk).
 
-    Only findings with status NOT IN ('Resolved','Accepted Risk',
-    'False Positive') are included — a resolved/accepted/false-positive
-    finding has nothing left to plan, matching how /findings' own status
-    filter and get_overdue_findings-style queries elsewhere in ARGUS
+    Only findings with status NOT IN ('Resolved','Accepted Risk', 'False Positive') are included — a resolved/accepted/false-positive
+    finding has nothing left to plan, matching how /findings' own status filter and get_overdue_findings-style queries elsewhere in ARGUS
     already treat those three statuses as "closed out".
     """
     conn = get_connection()

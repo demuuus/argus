@@ -4,9 +4,8 @@ Single source of truth for turning a product query into the exact set of
 NVD CVEs that authoritatively apply to it.
 
 This used to be implemented separately (and differently) in three places:
- - dashboard/app.py's Live NVD Search (/cves)
- - nvd/client.py's get_cve_summary() -- used by the asset scanner and by
-   the Telegram /cve command (handlers/cve.py)
+- dashboard/app.py's Live NVD Search (/cves)
+- nvd/client.py's get_cve_summary() -- used by the asset scanner and by the Telegram /cve command (handlers/cve.py)
 
 Because each copy evolved independently, "Live NVD Search" and "Scan All
 Assets" could -- and did -- return different results for the same product,
@@ -33,17 +32,8 @@ from nvd.http import get as _http_get
 _BASE_CVES = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 _BASE_CPES = "https://services.nvd.nist.gov/rest/json/cpes/2.0"
 
-# A full, valid CVE ID (e.g. CVE-2024-2313) must never be treated as a
-# keyword search. Without keywordExactMatch, NVD's single-word keywordSearch
-# does a wildcard/prefix-style match, so "CVE-2024-2313" would match
-# CVE-2024-23138, CVE-2024-23139, etc. -- similarly-prefixed but genuinely
-# different vulnerabilities. A security tool must never show a lookalike
-# CVE in place of the exact one requested.
 CVE_ID_RE = re.compile(r"^CVE-\d{4}-\d{4,10}$", re.IGNORECASE)
 
-# A trailing dotted version token, e.g. the '6.4.15' in 'FortiOS 6.4.15'.
-# A bare number with no dot (e.g. the '10' in 'Windows 10') does NOT match
-# this and is correctly left as part of the product phrase instead.
 _VERSION_TOKEN_RE = re.compile(r"^\d+(\.\d+){1,3}[a-zA-Z0-9]*$")
 
 
@@ -166,11 +156,6 @@ def resolve_cpe_vendor_products(phrase: str):
         return _http_get(url, timeout=(10, 60))
 
     triples = set()
-    # Try exact phrase first (e.g. "Fortinet FortiOS"); fall back to a loose
-    # search on the bare product name if that finds nothing. Either way,
-    # the strict product-slug check below is what actually guarantees
-    # correctness -- "exact"/loose here only affects how many candidates
-    # get fetched before that filter runs.
     for exact in ([True, False] if " " in phrase else [False]):
         r = _query(exact)
         if r is None or not r.ok:
@@ -222,11 +207,6 @@ def get_cves_for_product(product_phrase: str, version: str | None):
     if not product_phrase:
         return [], None, None
 
-    # A version value is only usable for CPE matching if it actually looks
-    # like one (contains a digit). Free-text asset version fields can
-    # legitimately contain junk like '', '-', 'Unknown', 'Latest' -- treat
-    # those the same as "no version" rather than erroring or matching
-    # nothing.
     usable_version = version.strip() if version and re.search(r"\d", version) else None
 
     if usable_version:
@@ -283,10 +263,6 @@ def get_cves_for_product(product_phrase: str, version: str | None):
         filtered = [item for item in vulnerabilities if version_in_range(usable_version, item["cve"])]
         return filtered, note, None
 
-    # No usable version: broad exact-phrase/word match on the product name.
-    # Always exact-match here (single word or phrase): without it, NVD's
-    # single-word keywordSearch also does wildcard/partial matching, which
-    # is the same "too broad" problem in miniature.
     r = nvd_keyword_search(product_phrase, exact=True, results_per_page=100, start_index=0)
     if r is None or not r.ok:
         return [], None, _describe_failure(r)

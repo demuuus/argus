@@ -356,22 +356,6 @@ def basics():
     )
     
 # ── Live NVD Search helpers ──────────────────────────────────────────────────
-# All CVE ID / version / CPE matching logic now lives in nvd.matching (see
-# that module's docstring) -- the same module the asset scanner and the
-# Telegram /cve command use, so every entry point in ARGUS agrees on what a
-# product/version query matches. get_cves_for_query is imported below.
-
-# Flipping pages or changing sort order on the same search re-ran every NVD
-# call from scratch. We cache the resolved (pre-sort, pre-pagination) result
-# list per browser session + query, so paging is instant and NVD isn't
-# hit again until the query actually changes.
-#
-# Deliberately NOT tied to "the user leaves the page": browsers don't
-# reliably fire a signal for that (tab close, network drop, and simply
-# navigating away all fail to guarantee a cleanup request reaches the
-# server), so relying on it would leak memory in exactly the cases that
-# matter most. A short idle TTL is a strictly better fit here -- it bounds
-# memory the same way, without depending on the client behaving.
 _LIVE_SEARCH_CACHE = {}
 _LIVE_SEARCH_CACHE_LOCK = threading.Lock()
 _LIVE_SEARCH_CACHE_TTL_SECONDS = 600  # 10 minutes idle
@@ -392,8 +376,6 @@ def _live_search_cache_get(key):
 def _live_search_cache_set(key, value):
     with _LIVE_SEARCH_CACHE_LOCK:
         now = time.time()
-        # Opportunistic cleanup keeps memory bounded without a background
-        # thread or relying on any client-side signal.
         for k in [k for k, (_, exp) in _LIVE_SEARCH_CACHE.items() if exp < now]:
             del _LIVE_SEARCH_CACHE[k]
         _LIVE_SEARCH_CACHE[key] = (value, now + _LIVE_SEARCH_CACHE_TTL_SECONDS)
@@ -424,10 +406,6 @@ def cves_live():
         results, note = cached["results"], cached["note"]
 
     elif keyword:
-        # All matching logic (CVE ID exact lookup, version-aware CPE
-        # matching, exact-phrase fallback) lives in nvd.matching -- the same
-        # module used by the asset scanner and the Telegram /cve command, so
-        # all three always agree on what a query matches.
         vulnerabilities, note, error = get_cves_for_query(keyword)
 
         if error is not None:
@@ -564,13 +542,6 @@ def cve_detail(cve_id):
     if not cve:
         return render_template("cve_detail.html", cve=None, analysis=None, cve_id=cve_id)
 
-    # Pull the cached AI analysis (Requirement 2) if one exists. This was
-    # previously never wired in here at all — the AI chat could already
-    # answer rich questions about a CVE using this same cached data, but
-    # the CVE detail PAGE only ever showed the raw NVD description, with
-    # no link between the two. Only surface it if status == 'complete';
-    # a 'pending'/'processing'/'failed' row has no usable written content
-    # and showing it would just display empty/placeholder text.
     analysis = None
     try:
         cached = get_cached_analysis(cve_id)
@@ -616,7 +587,6 @@ def index():
             kevs = cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM reports")
             reports = cur.fetchone()[0]
-            # Recent findings: one row per CVE, include the asset with highest risk score for that CVE
             cur.execute("""
                 SELECT DISTINCT ON (m.cve_id)
                     m.cve_id,
@@ -627,7 +597,6 @@ def index():
                 ORDER BY m.cve_id, m.risk_score DESC
             """)
             recent_findings = sorted(cur.fetchall(), key=lambda r: r[1], reverse=True)[:5]
-            # Top 5 risks: highest risk score per unique CVE, with asset name
             cur.execute("""
                 SELECT
                     m.cve_id,
@@ -702,11 +671,6 @@ def index():
         conn.close()
 
     # ── City Exposure Overview ────────────────────────────────────────────────
-    # One aggregate query (get_city_exposure_summary), not one query per
-    # city — required by the feature's own performance constraints. All
-    # enrichment (coordinates, risk level, mapped/unmapped, URLs) happens
-    # in Python on the already-small result set, never inside a loop of
-    # additional DB calls.
     from database.assets import get_city_exposure_summary, get_unassigned_asset_count
     from config.locations import get_coordinates, classify_risk_level, RISK_LEVEL_COLORS
     from urllib.parse import quote
@@ -829,11 +793,6 @@ def assets():
 
     sort = request.args.get("sort", "id_asc")
 
-    # City Exposure Overview: optional country/city filter, validated
-    # server-side. An invalid country is ignored entirely (falls back to
-    # unfiltered) rather than producing a confusing empty result; a city
-    # filter without a valid country is also safely ignored, per the
-    # feature spec's explicit requirement to "handle it safely".
     country_filter = (request.args.get("country", "") or "").strip().upper()[:2]
     city_filter = (request.args.get("city", "") or "").strip()
     if country_filter not in SUPPORTED_LOCATIONS:
@@ -842,8 +801,6 @@ def assets():
     elif city_filter and city_filter not in SUPPORTED_LOCATIONS[country_filter]["cities"]:
         city_filter = ""
 
-    # Exposure/function filters follow the same "invalid value silently
-    # ignored, not an error" convention as the city/country filters above.
     exposure_filter = (request.args.get("exposure", "") or "").strip()
     if exposure_filter not in VALID_EXPOSURES:
         exposure_filter = ""
@@ -944,7 +901,6 @@ def assets():
 
 
 # ── Findings ──────────────────────────────────────────────────────────────────
-
 @app.route("/findings")
 @login_required
 def findings():
@@ -967,15 +923,11 @@ def findings():
 
     # Optional filters
     vendor_filter  = request.args.get("vendor",  "").strip()
-    risk_filter    = request.args.get("risk",    "").strip()   # Low/Medium/High/Critical
-    kev_filter     = request.args.get("kev",     "").strip()   # "true" or "false"
-    keyword_filter = request.args.get("keyword", "").strip()   # free text: CVE ID / vendor / product
+    risk_filter    = request.args.get("risk",    "").strip()
+    kev_filter     = request.args.get("kev",     "").strip()
+    keyword_filter = request.args.get("keyword", "").strip()
     status_filter  = request.args.get("status", "").strip()
-
-    # City Exposure Overview: filter findings by the city/country of the
-    # matched asset. Validated the same way as the /assets route — an
-    # invalid country is ignored entirely, a city without a valid country
-    # is ignored too, rather than producing a confusing empty result.
+    
     from config.locations import SUPPORTED_LOCATIONS
     country_filter = (request.args.get("country", "") or "").strip().upper()[:2]
     city_filter = (request.args.get("city", "") or "").strip()
@@ -1157,7 +1109,6 @@ def reports():
     finally:
         conn.close()
 
-    # Convert tuple list to list of dictionaries
     reports = [{"id": row[0], "report_type": row[1], "generated_at": row[2]} for row in rows]
 
     return render_template(
@@ -1184,7 +1135,7 @@ def download_report(report_id):
 
     stored_path = row[0]
     # Support both absolute paths (legacy) and bare filenames
-    stored_path = Path(report["file_path"]).resolve()
+    stored_path = Path(stored_path).resolve()
     allowed_root = REPORTS_DIR.resolve()
 
     if allowed_root not in stored_path.parents:
@@ -1193,11 +1144,10 @@ def download_report(report_id):
     if not stored_path.is_file():
         abort(404)
 
-    return send_file(report_path, as_attachment=True, download_name=os.path.basename(report_path))
+    return send_file(stored_path, as_attachment=True, download_name=os.path.basename(stored_path))
 
 
 # ── Asset / Finding detail ────────────────────────────────────────────────────
-
 @app.route("/asset/<int:asset_id>")
 @login_required
 def asset_detail(asset_id):
@@ -1287,7 +1237,7 @@ def asset_detail(asset_id):
 @app.route("/finding/<cve_id>")
 @login_required
 def finding_detail(cve_id):
-    ref  = request.args.get("ref", "findings")   # where to go back
+    ref  = request.args.get("ref", "findings")
     sort = request.args.get("sort", "risk_desc")
     ORDER_MAP = {
         "risk_desc":   "max_risk DESC",
@@ -1355,13 +1305,6 @@ def finding_detail(cve_id):
     finally:
         conn.close()
 
-    # Pull the cached AI analysis (Requirement 2/3) for this CVE, if one
-    # exists. This is the actual page shown when clicking a finding from
-    # /findings — previously this only ever displayed the raw NVD
-    # description, with no connection to the AI analysis already being
-    # generated and cached for the same CVE in cve_ai_analysis. Only
-    # surface it when status == 'complete'; a 'pending'/'processing'/
-    # 'failed' row has no usable written content yet.
     analysis = None
     try:
         from database.cve_analysis import get_cached_analysis
@@ -1475,9 +1418,7 @@ def update_patch_plan():
     from database.matches import update_patch_plan as _update_patch_plan
 
     if request.form.get("clear_schedule"):
-        # "Remove from schedule" — clears the date and notes only. Any
-        # existing assignment is left alone; unscheduling isn't the same
-        # thing as un-assigning.
+
         _update_patch_plan(asset_id, cve_id, None, None)
     else:
         raw_date = (request.form.get("planned_patch_date", "") or "").strip()
@@ -1491,9 +1432,6 @@ def update_patch_plan():
             except ValueError:
                 return "Invalid date format", 400
 
-        # Only touch assigned_to if the submitting form actually has that
-        # field — the older inline quick-set date field on the asset page
-        # doesn't, and must keep not touching it.
         if "assigned_to" in request.form:
             assigned_to = (request.form.get("assigned_to", "") or "").strip() or None
             _update_patch_plan(asset_id, cve_id, planned_patch_date, patch_notes, assigned_to=assigned_to)
@@ -1640,14 +1578,14 @@ def charts():
                 SELECT COUNT(DISTINCT c.cve_id)
                 FROM cves c
                 WHERE c.kev = TRUE
-                  AND c.cve_id IN (SELECT DISTINCT cve_id FROM matches)
+                AND c.cve_id IN (SELECT DISTINCT cve_id FROM matches)
             """)
             kev_count = cur.fetchone()[0]
             cur.execute("""
                 SELECT COUNT(DISTINCT c.cve_id)
                 FROM cves c
                 WHERE (c.kev = FALSE OR c.kev IS NULL)
-                  AND c.cve_id IN (SELECT DISTINCT cve_id FROM matches)
+                AND c.cve_id IN (SELECT DISTINCT cve_id FROM matches)
             """)
             non_kev_count = cur.fetchone()[0]
 
@@ -1680,8 +1618,7 @@ def charts():
         elif score <= 100: buckets["76-100"] += 1
         else:              buckets["101+"]   += 1
     fig, ax = plt.subplots(figsize=(8, 4))
-    ax.bar(list(buckets.keys()), list(buckets.values()),
-           color=["#198754", "#0dcaf0", "#ffc107", "#fd7e14", "#dc3545"])
+    ax.bar(list(buckets.keys()), list(buckets.values()), color=["#198754", "#0dcaf0", "#ffc107", "#fd7e14", "#dc3545"])
     ax.set_title("Risk Score Distribution")
     ax.set_ylabel("Count")
     _save_chart("risk_distribution.png")
@@ -1690,8 +1627,7 @@ def charts():
     # Chart 3 — KEV pie
     fig, ax = plt.subplots(figsize=(5, 5))
     if kev_count + non_kev_count > 0:
-        ax.pie([kev_count, non_kev_count], labels=["KEV", "Non-KEV"],
-               colors=["#dc3545", "#198754"], autopct="%1.1f%%", startangle=140)
+        ax.pie([kev_count, non_kev_count], labels=["KEV", "Non-KEV"], colors=["#dc3545", "#198754"], autopct="%1.1f%%", startangle=140)
     else:
         ax.text(0.5, 0.5, "No data", ha="center", va="center")
     ax.set_title("KEV vs Non-KEV")
@@ -1726,19 +1662,11 @@ def add_asset_page():
         sk      = request.form.get("search_keyword", "").strip() or f"{vendor} {product} {version}"
         asset_type = request.form.get("type", "Unknown")
 
-        # Exposure/function: same "validate server-side, coerce rather
-        # than reject" approach as asset_type — an unrecognised value
-        # (tampered form, stale client) falls back to a safe default
-        # instead of failing the whole asset creation.
         exposure = request.form.get("exposure", "Internal")
         exposure = exposure if exposure in VALID_EXPOSURES else "Internal"
         function = request.form.get("function", "") or None
         function = function if function in VALID_FUNCTIONS else None
 
-        # City/country: server-side validation, never trust the dropdown
-        # alone (the feature spec's own explicit requirement). An invalid
-        # or mismatched combination is silently stored as NULL rather than
-        # rejecting the whole asset — city is an optional field.
         country_code = (request.form.get("country_code", "") or "").strip().upper()[:2] or None
         city = (request.form.get("city", "") or "").strip() or None
         if not is_valid_city(country_code, city):
@@ -1793,9 +1721,6 @@ def edit_asset(asset_id):
             function = request.form.get("function", "") or None
             function = function if function in VALID_FUNCTIONS else None
 
-            # Server-side validation — never trust the dependent dropdown
-            # alone. An invalid/mismatched combination clears city/country
-            # to NULL rather than rejecting the whole edit.
             country_code = (request.form.get("country_code", "") or "").strip().upper()[:2] or None
             city = (request.form.get("city", "") or "").strip() or None
             if not is_valid_city(country_code, city):
@@ -1822,10 +1747,8 @@ def edit_asset(asset_id):
             return redirect("/assets")
         with conn.cursor() as cur:
             cur.execute(
-                """SELECT id, vendor, product, version, location, owner,
-                          criticality, notes, search_keyword, type, city, country_code,
-                          exposure, function
-                   FROM assets WHERE id=%s""",
+                """SELECT id, vendor, product, version, location, owner, criticality, notes, search_keyword, type, city, country_code, exposure, function
+                FROM assets WHERE id=%s""",
                 (asset_id,),
             )
             asset = cur.fetchone()
@@ -1873,9 +1796,6 @@ def delete_asset(asset_id):
 def api_chart_assets():
     conn = get_connection()
     cur = conn.cursor()
-    # Merge duplicate asset rows that share the same vendor+product name
-    # (e.g. 4x "D-Link DIR-825" registered as separate asset IDs) into one bar.
-    # MIN(a.id) picks a representative asset_id for the click-through link.
     cur.execute("""
         SELECT
             MIN(a.id) AS rep_id,
@@ -2033,25 +1953,19 @@ def ai_chat():
     if not user_message:
         return jsonify({"response": "Please enter a message.", "tokens": 0})
 
-    # ── Resolve / create the conversation this message belongs to ───────────
     is_new_conversation = False
     if conversation_id:
         existing = get_conversation(conversation_id, current_user.username)
         if not existing:
-            # Conversation ID was stale, deleted, or belongs to another user —
-            # start a fresh one rather than silently failing.
             conversation_id = None
 
     if not conversation_id:
         conversation_id = create_conversation(current_user.username)
         is_new_conversation = True
 
-    # Persist the user's message immediately, before calling the LLM, so a
-    # crash mid-request never loses what the user typed.
     add_message(conversation_id, "user", user_message)
 
     if is_new_conversation:
-        # Title the conversation from its first message (ChatGPT-style).
         rename_conversation(
             conversation_id, current_user.username,
             auto_title_from_message(user_message),
@@ -2073,7 +1987,6 @@ def ai_chat():
         add_message(conversation_id, "assistant", answer)
         return jsonify({"response": answer, "tokens": 0, "conversation_id": conversation_id})
 
-    # ── Build ARGUS-specific context for the question ────────────────────────
     try:
         cb = ContextBuilder()
         argus_context = cb.build_context(user_message)
@@ -2081,19 +1994,9 @@ def ai_chat():
         logger.warning("[ai_chat] context_builder failed: %s", exc)
         argus_context = ""
 
-    # ── Check the response cache (Requirement 8) ─────────────────────────────
-    # Keyed on (question + argus_context), so the cache automatically misses
-    # the moment ARGUS data changes — a stale answer can never be served just
-    # because the question text repeats. Conversation history is deliberately
-    # excluded from caching: a cache hit always serves the same standalone
-    # answer regardless of prior conversation, which is correct for these
-    # data-lookup-style questions but means follow-ups like "what about
-    # that one?" should not be cached — only cache when there's no real
-    # conversation history yet to avoid serving a context-blind answer to a
-    # follow-up question.
     from database.chat_cache import make_cache_key, get_cached_response, save_response
     history_so_far = get_recent_history_for_llm(conversation_id, current_user.username)
-    is_followup = len(history_so_far) > 1  # >1 because the user's own message was just persisted
+    is_followup = len(history_so_far) > 1
 
     cache_key = make_cache_key(user_message, argus_context)
     if not is_followup:
@@ -2188,8 +2091,7 @@ def ai_chat():
         })
 
 
-# ── Conversation management (Phase 6, Requirement 1) ───────────────────────────
-
+# ── Conversation management ───────────────────────────
 @app.route("/api/conversations", methods=["GET"])
 @login_required
 def api_list_conversations():
@@ -2207,14 +2109,12 @@ def api_list_conversations():
         ]
     })
 
-
 @app.route("/api/conversations", methods=["POST"])
 @login_required
 def api_create_conversation():
     from database.conversations import create_conversation
     conv_id = create_conversation(current_user.username)
     return jsonify({"conversation_id": conv_id})
-
 
 @app.route("/api/conversations/<int:conversation_id>", methods=["GET"])
 @login_required
@@ -2240,7 +2140,6 @@ def api_get_conversation_messages(conversation_id):
         ],
     })
 
-
 @app.route("/api/conversations/<int:conversation_id>", methods=["DELETE"])
 @login_required
 def api_delete_conversation(conversation_id):
@@ -2249,7 +2148,6 @@ def api_delete_conversation(conversation_id):
     if not deleted:
         return jsonify({"error": "Conversation not found"}), 404
     return jsonify({"deleted": True})
-
 
 @app.route("/api/conversations/<int:conversation_id>/rename", methods=["POST"])
 @login_required
@@ -2288,17 +2186,7 @@ def today():
         except Exception as exc:
             results = []
 
-    # Build a compact per-asset summary to display on dashboard
     total_new   = sum(len(r.get("new_findings", [])) for r in results)
-    # Use the EXACT same query as the dashboard's "Tracked Vulnerabilities"
-    # card (see index() above: SELECT COUNT(DISTINCT m.cve_id) FROM matches
-    # JOIN cves), not a bare SELECT COUNT(*) FROM cves. The two are NOT
-    # equivalent: the cves table also accumulates CVEs that NVD returned
-    # for a broad keyword search but that never actually matched/linked to
-    # one of your assets via the matches table — those inflate a raw table
-    # count without representing real findings. Counting distinct matched
-    # CVEs is what the dashboard card actually means by "tracked", so this
-    # query must mirror it exactly to ever agree.
     try:
         conn = get_connection()
         try:
@@ -2312,9 +2200,7 @@ def today():
         finally:
             conn.close()
     except Exception:
-        # Fall back to the scan-local count if the DB read fails for any
-        # reason — better to show a possibly-narrower number than crash
-        # the whole scan-summary panel.
+
         all_cve_ids = {c["id"] for r in results for c in r.get("cves", [])}
         total_cves = len(all_cve_ids)
     errors      = sum(1 for r in results if r.get("error"))
@@ -2338,13 +2224,11 @@ def today():
         "error_lines": error_lines,
         "ts":      __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
-    # Store in session so dashboard can display it
     session["scan_summary"] = scan_summary
     return redirect(url_for("index"))
 
 
 # ── Patched toggle ────────────────────────────────────────────────────────────
-
 @app.route("/toggle_patched/<int:asset_id>/<cve_id>", methods=["POST"])
 @login_required
 @admin_required
@@ -2369,9 +2253,7 @@ def toggle_patched(asset_id, cve_id):
         return redirect(request.referrer or "/findings")
     return redirect(f"/asset/{asset_id}")
 
-
 # ── Report generation (web) ───────────────────────────────────────────────────
-
 @app.route("/generate_report/<report_type>", methods=["POST"])
 @login_required
 @admin_required
@@ -2403,9 +2285,6 @@ def generate_report(report_type):
             logger.exception("[generate_report] %s report generation raised an exception", report_type)
             error_message = str(exc)
 
-    # The generator functions catch their own exceptions internally and return
-    # None on failure (see reports/daily.py etc.) rather than raising — so we
-    # must also check for a None/falsy return value, not just an exception.
     if error_message is None and not result_path:
         error_message = (
             f"{report_type.title()} report generation failed. "
@@ -2485,17 +2364,7 @@ def _ensure_schema() -> None:
         "CREATE INDEX IF NOT EXISTS idx_matches_due_date ON matches(due_date)",
         "CREATE INDEX IF NOT EXISTS idx_matches_asset_id ON matches(asset_id)",
         "CREATE INDEX IF NOT EXISTS idx_matches_cve_id   ON matches(cve_id)",
-        # Phase 6: AI Security Copilot — persistent conversations + CVE analysis cache.
-        # Created here too (not just in database/migrate.py) so a fresh deployment
-        # never 500s on /api/chat just because someone forgot the manual migration step.
-        #
-        # IMPORTANT: an earlier ad-hoc setup already created ai_conversations,
-        # ai_messages, and cve_ai_analysis with a different (narrower) shape —
-        # e.g. ai_conversations.user_id INTEGER instead of username TEXT, and
-        # no updated_at/archived/tokens columns. CREATE TABLE IF NOT EXISTS
-        # silently no-ops against that pre-existing table, so the ALTER TABLE
-        # ... ADD COLUMN IF NOT EXISTS statements below are what actually
-        # repair it on every app start, regardless of which shape was there.
+
         """
         CREATE TABLE IF NOT EXISTS ai_conversations (
             id          SERIAL PRIMARY KEY,
@@ -2521,13 +2390,7 @@ def _ensure_schema() -> None:
         )
         """,
         "ALTER TABLE ai_messages ADD COLUMN IF NOT EXISTS tokens INTEGER DEFAULT 0",
-        # CRITICAL REPAIR: see database/migrate.py for full explanation —
-        # ai_messages.conversation_id was missing its FK to ai_conversations
-        # because CREATE TABLE IF NOT EXISTS silently skipped it against the
-        # pre-existing table. Without it, deleting a conversation never
-        # cascades to its messages, leaving permanent orphans. Clean up any
-        # existing orphans first (required before Postgres will allow adding
-        # the FK), then add the constraint.
+
         "DELETE FROM ai_messages WHERE conversation_id NOT IN (SELECT id FROM ai_conversations)",
         """
         DO $$
@@ -2586,8 +2449,7 @@ def _ensure_schema() -> None:
         END $$
         """,
         "CREATE INDEX IF NOT EXISTS idx_cve_ai_analysis_status ON cve_ai_analysis(status)",
-        # Phase 6 Requirement 5: trend analysis needs historical daily
-        # aggregates — see database/migrate.py for the full rationale.
+
         """
         CREATE TABLE IF NOT EXISTS risk_snapshots (
             id                   SERIAL PRIMARY KEY,
@@ -2606,7 +2468,6 @@ def _ensure_schema() -> None:
         )
         """,
         "CREATE INDEX IF NOT EXISTS idx_risk_snapshots_date ON risk_snapshots(snapshot_date DESC)",
-        # Phase 6 Requirement 8: chat response cache.
         """
         CREATE TABLE IF NOT EXISTS ai_response_cache (
             cache_key   TEXT        PRIMARY KEY,
@@ -2619,7 +2480,6 @@ def _ensure_schema() -> None:
         )
         """,
         "CREATE INDEX IF NOT EXISTS idx_ai_response_cache_expires ON ai_response_cache(expires_at)",
-        # City Exposure Overview feature — nullable, additive only.
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS city VARCHAR(120)",
         "ALTER TABLE assets ADD COLUMN IF NOT EXISTS country_code CHAR(2)",
         "CREATE INDEX IF NOT EXISTS idx_assets_city_country ON assets (country_code, city)",
@@ -2678,23 +2538,8 @@ def _start_scheduler_if_enabled() -> None:
         scheduler.start()
         logger.info("APScheduler started from app.py (daily scan, AI analysis, risk snapshots).")
     except Exception as exc:
-        # A scheduler failure must never prevent the Flask app itself from
-        # starting — the dashboard, login, and chat all work fine without it,
-        # they just won't get the background jobs.
         logger.error("Failed to start scheduler from app.py: %s", exc)
         return
-
-    # Record an immediate snapshot for today, in addition to the 06:30 UTC
-    # cron job. Why: APScheduler's cron trigger only fires at its next
-    # scheduled occurrence — it does NOT retroactively run if the app
-    # starts after 06:30 UTC has already passed for the day. Confirmed in
-    # production: a deployment that restarted mid-morning had AI analysis
-    # data flowing correctly (proving the scheduler itself was running)
-    # but risk_snapshots stayed empty, because today's 06:30 slot had
-    # already been missed and wouldn't fire again until tomorrow.
-    # record_today_snapshot() is an UPSERT (ON CONFLICT DO UPDATE), so
-    # calling it here is always safe — it either creates today's baseline
-    # immediately, or harmlessly refreshes a row the cron job already wrote.
     try:
         from database.risk_snapshots import record_today_snapshot
         record_today_snapshot()
@@ -2702,15 +2547,6 @@ def _start_scheduler_if_enabled() -> None:
     except Exception as exc:
         logger.error("Failed to record startup risk snapshot: %s", exc)
 
-    # Refresh the AI views (ai_dashboard, ai_open_findings, ai_asset_summary,
-    # ai_vulnerability_summary) from schema.sql on every startup too.
-    # CREATE OR REPLACE VIEW is always safe to re-run — it has no effect if
-    # the view definition is unchanged, and picks up fixes immediately
-    # otherwise (e.g. the severity-casing bug found in ai_asset_summary:
-    # the view compared c.severity = 'Critical' but the column actually
-    # stores NVD's own uppercase convention, 'CRITICAL', so the comparison
-    # never matched and critical_vulnerabilities silently read 0 forever).
-    # Previously this only ran via a manual `python database/migrate.py`.
     try:
         from database.migrate import run_ai_views
         run_ai_views()

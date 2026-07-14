@@ -187,11 +187,6 @@ CREATE INDEX IF NOT EXISTS idx_assets_exposure ON assets(exposure);
 CREATE INDEX IF NOT EXISTS idx_assets_function ON assets(function);
 CREATE INDEX IF NOT EXISTS idx_matches_planned_patch_date ON matches(planned_patch_date);
 
--- cves.kev and cves.cvss are filtered/sorted on heavily by app.py
--- (/findings KEV filter and CVSS sort, /cves live search sort, dashboard
--- KEV counts) but had no supporting index, forcing a sequential scan of
--- the entire cves table on every such query. At millions-of-CVEs scale
--- this is the difference between an index scan and a full table scan.
 CREATE INDEX IF NOT EXISTS idx_cves_kev  ON cves(kev) WHERE kev = TRUE;
 CREATE INDEX IF NOT EXISTS idx_cves_cvss ON cves(cvss DESC);
 
@@ -216,13 +211,6 @@ CREATE TABLE IF NOT EXISTS users (
 -- ─────────────────────────────────────────────
 -- AI Views
 -- ─────────────────────────────────────────────
--- NOTE: this view's shape must match the version already deployed in
--- production (see database/migrate.py's run_ai_views() comment). The
--- richer aggregate version that was here previously caused a column
--- mismatch error if ever run against an existing ai_dashboard view —
--- CREATE OR REPLACE VIEW cannot add/reorder columns on an existing view.
--- If you need the richer stats, query ai_open_findings / ai_asset_summary
--- directly from context_builder.py instead of widening this view.
 CREATE OR REPLACE VIEW ai_dashboard AS
 SELECT
     COUNT(*) AS total_findings,

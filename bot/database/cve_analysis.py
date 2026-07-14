@@ -7,10 +7,8 @@ dashboard view, chat question, or report, avoiding repeated LLM calls.
 
 The cache is considered stale and eligible for re-analysis when:
     - No row exists yet for the CVE.
-    - The stored description_hash no longer matches the current CVE
-      description (the NVD description changed).
-    - The stored model_used no longer matches the currently configured
-      model (an upgrade should re-analyze for better quality).
+    - The stored description_hash no longer matches the current CVE description (the NVD description changed).
+    - The stored model_used no longer matches the currently configured model (an upgrade should re-analyze for better quality).
 
 This module handles the cache's read/write contract. The worker that
 actually calls the LLM and is triggered on new-CVE-discovery lives in
@@ -199,7 +197,7 @@ def get_pending_cves(limit: int = 10) -> list:
                 SELECT cve_id, retry_count
                 FROM cve_ai_analysis
                 WHERE status = 'pending'
-                   OR (status = 'failed' AND retry_count < 3)
+                OR (status = 'failed' AND retry_count < 3)
                 ORDER BY updated_at ASC
                 LIMIT %s
                 """,
@@ -240,21 +238,21 @@ def backfill_missing_analysis() -> int:
                     FROM cves c
                     LEFT JOIN cve_ai_analysis a ON a.cve_id = c.cve_id
                     WHERE a.cve_id IS NULL
-                      -- Only queue CVEs that are still linked to at least
-                      -- one asset that genuinely exists right now. Without
-                      -- this check, this function (which runs on every app
-                      -- startup to catch the original Phase 6 backlog)
-                      -- would re-queue CVEs forever even after their only
-                      -- asset was deleted -- confirmed in production: a
-                      -- "Microsoft Windows 11" asset was deleted, but its
-                      -- CVEs (e.g. CVE-2008-5745) kept getting re-analyzed
-                      -- on every restart because this query never checked
-                      -- whether the asset still existed.
-                      AND EXISTS (
-                          SELECT 1 FROM matches m
-                          JOIN assets ast ON ast.id = m.asset_id
-                          WHERE m.cve_id = c.cve_id
-                      )
+                    -- Only queue CVEs that are still linked to at least
+                    -- one asset that genuinely exists right now. Without
+                    -- this check, this function (which runs on every app
+                    -- startup to catch the original Phase 6 backlog)
+                    -- would re-queue CVEs forever even after their only
+                    -- asset was deleted -- confirmed in production: a
+                    -- "Microsoft Windows 11" asset was deleted, but its
+                    -- CVEs (e.g. CVE-2008-5745) kept getting re-analyzed
+                    -- on every restart because this query never checked
+                    -- whether the asset still existed.
+                    AND EXISTS (
+                        SELECT 1 FROM matches m
+                        JOIN assets ast ON ast.id = m.asset_id
+                        WHERE m.cve_id = c.cve_id
+                    )
                     ON CONFLICT (cve_id) DO NOTHING
                     """
                 )

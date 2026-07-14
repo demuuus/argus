@@ -3,13 +3,13 @@ chat_cache.py - cache layer for repeated identical AI chat questions
 (Phase 6, Requirement 8: Performance).
 
 Why hash (question + ARGUS context) rather than just the question:
-  The same literal question text ("which CVE should I fix first?") can
-  have a genuinely different correct answer depending on the live state
-  of your assets/findings/analysis data. Hashing the question together
-  with the ARGUS context string that would have been built for it means
-  the cache automatically invalidates the moment the underlying data
-  changes (new scan, new AI analysis, new finding) - no manual
-  cache-busting logic needed anywhere else in the codebase.
+The same literal question text ("which CVE should I fix first?") can
+have a genuinely different correct answer depending on the live state
+of your assets/findings/analysis data. Hashing the question together
+with the ARGUS context string that would have been built for it means
+the cache automatically invalidates the moment the underlying data
+changes (new scan, new AI analysis, new finding) - no manual
+cache-busting logic needed anywhere else in the codebase.
 
 A short TTL is still enforced as a second safety net, in case two
 different states of ARGUS data ever happen to hash-collide in a way that
@@ -25,10 +25,6 @@ from database.db import get_connection
 
 logger = logging.getLogger(__name__)
 
-# How long a cached answer stays valid even if its hash still matches.
-# Short on purpose - ARGUS data (scans, AI analysis) can change within
-# minutes, and a stale-but-cached answer about current risk is worse
-# than the cost of one extra LLM call.
 DEFAULT_TTL_MINUTES = 10
 
 
@@ -82,8 +78,6 @@ def get_cached_response(cache_key: str) -> Optional[dict]:
                 )
                 return {"response": row[0], "tokens": row[1]}
     except Exception as exc:
-        # A cache read failure must never break the chat — fall through
-        # to a normal LLM call as if it were simply a cache miss.
         logger.warning("[chat_cache] Cache read failed: %s", exc)
         return None
     finally:
@@ -116,8 +110,6 @@ def save_response(
                     (cache_key, question[:2000], response, tokens, expires_at),
                 )
     except Exception as exc:
-        # A cache write failure must never break the chat — the user
-        # already has their real answer; just log and move on.
         logger.warning("[chat_cache] Cache write failed: %s", exc)
     finally:
         conn.close()

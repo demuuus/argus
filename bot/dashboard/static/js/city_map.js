@@ -1,21 +1,3 @@
-/**
- * city_map.js - City Exposure Overview map (Phase 7).
- *
- * Renders one Leaflet marker per MAPPED city (cities without a configured
- * centroid are shown in the exposure table only, never on the map - they
- * are intentionally excluded here, not a bug).
- *
- * Data comes from the data-cities attribute already rendered server-side
- * by index.html (no extra fetch needed on initial load - the same
- * aggregate data used for the table is reused for the map, avoiding a
- * second round trip). The /api/dashboard/city-exposure endpoint exists
- * for any other consumer that needs the same data independently of the
- * dashboard page itself.
- *
- * Per the feature spec: city-centroid markers ONLY, sized by asset_count,
- * colored by risk_level, no per-asset pins, no exact coordinates.
- */
-
 (function () {
     "use strict";
 
@@ -32,8 +14,6 @@
             return;
         }
 
-        // Only mapped cities get a marker; unmapped ones are intentionally
-        // table-only (see panel-header note rendered server-side).
         const mappedCities = cities.filter(c => c.mapped && c.lat != null && c.lng != null);
 
         if (mappedCities.length === 0) {
@@ -49,21 +29,14 @@
         let map;
         try {
             map = L.map(container, {
-                scrollWheelZoom: false, // avoid hijacking page scroll inside a dashboard panel
+                scrollWheelZoom: false,
             });
         } catch (err) {
-            // A Leaflet init failure (e.g. the library failed to load) must
-            // never break the rest of the dashboard — fail visibly inside
-            // the map panel only.
             console.error("[city_map] Leaflet failed to initialize:", err);
             renderEmptyState(container, "Map failed to load.");
             return;
         }
 
-        // OpenStreetMap tiles — free, no API key required. If tiles fail
-        // to load (offline, blocked, rate-limited), Leaflet just shows
-        // blank/gray tiles under the markers; it does not throw or break
-        // the page, so no extra handling is needed here beyond logging.
         const tileLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
             maxZoom: 18,
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
@@ -83,7 +56,7 @@
             const marker = L.circleMarker([c.lat, c.lng], {
                 radius: radius,
                 color: color,
-                weight: c.kev_count > 0 ? 3 : 1,   // thicker outline = KEV present, per spec's "visually obvious" requirement
+                weight: c.kev_count > 0 ? 3 : 1,
                 fillColor: color,
                 fillOpacity: 0.55,
             }).addTo(map);
@@ -98,33 +71,18 @@
             map.fitBounds(bounds, { padding: [30, 30] });
         }
 
-        // Leaflet sizes itself based on the container's dimensions at the
-        // moment of creation. If the panel was hidden/animating or fonts
-        // were still loading, the map can render at the wrong size. A
-        // short delayed invalidateSize() call (the official Leaflet fix
-        // for this) ensures the map fills its container correctly.
         setTimeout(() => map.invalidateSize(), 250);
 
-        // Re-check sizing whenever the window resizes, so the map never
-        // causes horizontal overflow on narrow screens (spec requirement).
         window.addEventListener("resize", () => map.invalidateSize());
     }
 
     function markerRadius(assetCount, maxAssetCount) {
-        // Linear scale between a sensible minimum and maximum pixel
-        // radius, so a city with very few assets is still visible and a
-        // city with many assets doesn't dominate the whole map.
         const minR = 8, maxR = 28;
         const ratio = Math.min(1, (assetCount || 0) / maxAssetCount);
         return minR + ratio * (maxR - minR);
     }
 
     function buildPopupHtml(c) {
-        // All values come from server-rendered, already-escaped JSON data
-        // (Jinja2's |tojson filter HTML-escapes by default) — no further
-        // escaping needed here, but city names are still treated as plain
-        // text via textContent-equivalent string building, not innerHTML
-        // concatenation of unknown origin.
         const kevLine = c.kev_count > 0
             ? `<div style="color:#f75f5f;font-weight:600">⚠ ${c.kev_count} KEV finding${c.kev_count === 1 ? "" : "s"}</div>`
             : "";

@@ -18,10 +18,7 @@ from database.db import get_connection
 
 logger = logging.getLogger(__name__)
 
-# Cap how many messages are sent to the LLM as conversation history.
-# Prevents unbounded context growth on very long conversations (Requirement 7).
 MAX_HISTORY_MESSAGES = 20
-
 
 def create_conversation(username: str, title: str = "New conversation") -> int:
     """Create a new conversation for a user and return its id."""
@@ -191,7 +188,7 @@ def get_recent_history_for_llm(conversation_id: int, username: str,
                 FROM ai_messages m
                 JOIN ai_conversations c ON m.conversation_id = c.id
                 WHERE m.conversation_id = %s AND c.username = %s
-                  AND m.role IN ('user', 'assistant')
+                AND m.role IN ('user', 'assistant')
                 ORDER BY m.created_at DESC
                 LIMIT %s
                 """,
