@@ -2,7 +2,7 @@
 
 # Referensi Arsitektur Basis Data ARGUS
 
-🌐 [English](AI.md) | [Indonesia](AI.id.md)
+🌐 [English](DATABASE.md) | [Indonesia](DATABASE.id.md)
 
 </div>
 
