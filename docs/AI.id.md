@@ -1,8 +1,12 @@
+<div align="center">
+
 # Subsistem AI ARGUS — Referensi Teknis
 
-Dokumen ini adalah referensi teknis resmi untuk subsistem AI ARGUS: chat AI Security Copilot, pipeline analisis CVE background otomatis, dan segala sesuatu di bawahnya — perakitan konteks, konstruksi prompt, memori, caching, dan client LLM itu sendiri. Ditulis untuk AI engineer, arsitek software, kontributor, dan peninjau keamanan yang perlu memahami bagaimana subsistem AI sesungguhnya bekerja, bukan bagaimana platform bertenaga-AI tipikal diasumsikan bekerja.
-
 🌐 [English](AI.md) | [Indonesia](AI.id.md)
+
+</div>
+
+Dokumen ini adalah referensi teknis resmi untuk subsistem AI ARGUS: chat AI Security Copilot, pipeline analisis CVE background otomatis, dan segala sesuatu di bawahnya — perakitan konteks, konstruksi prompt, memori, caching, dan client LLM itu sendiri. Ditulis untuk AI engineer, arsitek software, kontributor, dan peninjau keamanan yang perlu memahami bagaimana subsistem AI sesungguhnya bekerja, bukan bagaimana platform bertenaga-AI tipikal diasumsikan bekerja.
 
 > **Catatan akurasi, dan koreksi terhadap dokumen sebelumnya.** Setiap klaim dalam dokumen ini diverifikasi langsung terhadap source (route `/api/chat` milik `app.py`, `bot/Ai/context_builder.py`, `bot/Ai/analyzer.py`, `bot/Ai/llm.py`, `bot/Ai/queries.py`, `bot/Ai/prompts.py`, `bot/database/cve_analysis.py`, `bot/database/conversations.py`, `bot/database/chat_cache.py`). Dalam proses penulisan dokumen ini, satu ketidakakuratan ditemukan di `API.md` §7.1 dan `ARCHITECTURE.md` §10.1: dokumen-dokumen tersebut menyatakan bahwa jalur chat interaktif dan jalur analisis background "bertemu pada fungsi completion low-level yang sama." **Ini tidak benar.** Keduanya adalah dua jalur kode pemanggil-HTTP yang independen yang kebetulan mengimplementasikan bentuk request yang serupa — lihat §6.4 untuk arsitektur yang terverifikasi dan terkoreksi. Dokumen ini adalah sumber otoritatif untuk pembedaan tersebut ke depannya.
 
