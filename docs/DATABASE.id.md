@@ -1,4 +1,10 @@
+<div align="center">
+
 # Referensi Arsitektur Basis Data ARGUS
+
+🌐 [English](AI.md) | [Indonesia](AI.id.md)
+
+</div>
 
 Dokumen ini adalah referensi arsitektur basis data resmi untuk ARGUS. Dokumen ini menjelaskan desain skema, tujuan dan siklus hidup setiap tabel, relasi, indexing, performa, keamanan, dan strategi migrasi — dan, yang terpenting, di mana **basis data yang benar-benar terdeploy** berbeda dari apa yang dideklarasikan oleh kode definisi skema (`schema.sql`, `bot/database/migrate.py`).
 
