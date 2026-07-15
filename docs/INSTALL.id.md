@@ -1,804 +1,1562 @@
-<div align="center">
-  
 # Panduan Instalasi ARGUS
 
-🌐 [English](INSTALL.md) | [Indonesia](INSTALL.id.md)
-
-</div>
-
-Dokumen ini adalah manual instalasi dan konfigurasi resmi untuk ARGUS. Dokumen ini mencakup semua yang diperlukan untuk menjalankan deployment ARGUS secara menyeluruh: basis data PostgreSQL, dashboard web Flask, bot Telegram, scheduler latar belakang, dan AI Security Copilot.
-
-**Apa saja yang akan terpasang.** Sebuah basis data PostgreSQL, sebuah virtual environment Python berisi dependensi ARGUS, proses dashboard Flask (`app.py`), secara opsional proses bot Telegram (`bot/main.py`), dan — jika Anda menginginkan fitur AI — sebuah server LLM lokal yang kompatibel dengan OpenAI yang dipanggil oleh ARGUS melalui HTTP.
-
-**Perkiraan waktu instalasi.** 30–60 menit untuk instalasi pertama kali pada satu mesin dengan PostgreSQL yang sudah tersedia; 60–120 menit jika Anda juga memasang PostgreSQL dan server LLM lokal dari awal.
-
-**Pengetahuan teknis minimum yang dibutuhkan.** Terbiasa dengan shell command-line (Bash pada Linux/macOS, PowerShell atau Command Prompt pada Windows), pemahaman dasar mengenai penyuntingan file teks, dan pemahaman SQL/PostgreSQL yang cukup untuk menjalankan perintah `psql` seperti yang ditunjukkan. Tidak ada asumsi pengetahuan ARGUS sebelumnya.
-
-**Cakupan.** Dokumen ini mencakup instalasi, konfigurasi, verifikasi, pembaruan, backup/restore, pemecahan masalah, dan pengerasan (hardening) untuk produksi. Untuk apa yang dilakukan ARGUS dan bagaimana arsitekturnya, lihat [`README.md`](./README.md). Untuk detail rute/API, lihat tautan [Dokumentasi](#26-referensi).
-
-> **Catatan tentang akurasi.** Setiap perintah, variabel lingkungan, dan perilaku yang dijelaskan di bawah ini mencerminkan apa yang benar-benar diimplementasikan dalam basis kode ARGUS saat ini, diverifikasi langsung terhadap sumber kode (`app.py`, `bot/main.py`, `bot/database/db.py`, `bot/migrate.py`, `bot/database/schema.sql`, `bot/Ai/llm.py`, `bot/jobs/daily_scan.py`). Di mana pun panduan ini menjelaskan sesuatu yang belum diimplementasikan (paket Docker, misalnya), hal itu ditandai secara eksplisit sebagai **Direncanakan**.
+> **Catatan verifikasi.** Setiap perintah, path file, variabel environment, nilai default, dan perilaku yang dijelaskan dalam dokumen ini diverifikasi langsung terhadap kode sumber ARGUS — `bot/dashboard/app.py`, `bot/main.py`, `bot/database/db.py`, `bot/database/schema.sql`, `bot/database/migrate.py`, `bot/Ai/llm.py`, `bot/alerts/telegram_alert.py`, `bot/jobs/daily_scan.py`, `bot/nvd/`, dan `requirements.txt` — pada revisi ini. Tidak ada satu pun yang disimpulkan dari konvensi umum atau dari cara kerja "aplikasi Flask pada umumnya". Apa pun yang belum diimplementasikan secara eksplisit diberi label **Fitur Direncanakan**, dan tidak pernah dijelaskan seolah-olah sudah berfungsi.
 
 ---
 
 ## Daftar Isi
 
-1. [Persyaratan Sistem](#1-persyaratan-sistem)
-2. [Sistem Operasi yang Didukung](#2-sistem-operasi-yang-didukung)
-3. [Dependensi Perangkat Lunak](#3-dependensi-perangkat-lunak)
-4. [Instalasi Proyek](#4-instalasi-proyek)
+1. [Pendahuluan](#1-pendahuluan)
+2. [Ringkasan Instalasi](#2-ringkasan-instalasi)
+3. [Persyaratan Sistem](#3-persyaratan-sistem)
+4. [Instalasi Python](#4-instalasi-python)
 5. [Instalasi PostgreSQL](#5-instalasi-postgresql)
-6. [Inisialisasi Basis Data](#6-inisialisasi-basis-data)
-7. [Konfigurasi Environment](#7-konfigurasi-environment)
-8. [Instalasi AI](#8-instalasi-ai)
-9. [Konfigurasi API Eksternal](#9-konfigurasi-api-eksternal)
-10. [Konfigurasi Bot Telegram](#10-konfigurasi-bot-telegram)
-11. [Konfigurasi Dashboard](#11-konfigurasi-dashboard)
-12. [Konfigurasi Scheduler](#12-konfigurasi-scheduler)
-13. [Menjalankan ARGUS](#13-menjalankan-argus)
-14. [Konfigurasi Pertama Kali](#14-konfigurasi-pertama-kali)
-15. [Daftar Periksa Verifikasi](#15-daftar-periksa-verifikasi)
-16. [Memperbarui ARGUS](#16-memperbarui-argus)
-17. [Backup & Restore](#17-backup--restore)
-18. [Pemecahan Masalah](#18-pemecahan-masalah)
-19. [Logging](#19-logging)
-20. [Rekomendasi Keamanan](#20-rekomendasi-keamanan)
-21. [Rekomendasi Performa](#21-rekomendasi-performa)
-22. [Instalasi Docker (Dukungan Masa Depan)](#22-instalasi-docker-dukungan-masa-depan)
-23. [Deployment Produksi](#23-deployment-produksi)
-24. [Uninstalasi](#24-uninstalasi)
-25. [Pertanyaan yang Sering Diajukan](#25-pertanyaan-yang-sering-diajukan)
-26. [Referensi](#26-referensi)
+6. [Verifikasi PostgreSQL](#6-verifikasi-postgresql)
+7. [Layanan PostgreSQL](#7-layanan-postgresql)
+8. [Menghubungkan ke PostgreSQL](#8-menghubungkan-ke-postgresql)
+9. [Pembuatan Basis Data](#9-pembuatan-basis-data)
+10. [Pengguna PostgreSQL](#10-pengguna-postgresql)
+11. [Inisialisasi Skema](#11-inisialisasi-skema)
+12. [Verifikasi Basis Data](#12-verifikasi-basis-data)
+13. [Konfigurasi Environment](#13-konfigurasi-environment)
+14. [Verifikasi Environment](#14-verifikasi-environment)
+15. [Menjalankan ARGUS](#15-menjalankan-argus)
+16. [Verifikasi Instalasi](#16-verifikasi-instalasi)
+17. [Pemecahan Masalah](#17-pemecahan-masalah)
+18. [Deployment Produksi](#18-deployment-produksi)
+19. [Backup](#19-backup)
+20. [Memperbarui ARGUS](#20-memperbarui-argus)
+21. [Uninstalasi](#21-uninstalasi)
+22. [FAQ](#22-faq)
+23. [Lampiran untuk Pemula](#23-lampiran-untuk-pemula)
 
 ---
 
-## 1. Persyaratan Sistem
+## 1. Pendahuluan
 
-### Persyaratan Minimum
+### Apa itu ARGUS
 
-| Komponen | Minimum |
-|---|---|
-| CPU | 2 core |
-| RAM | 4 GB (8 GB jika Anda berencana menjalankan LLM lokal di mesin yang sama) |
-| Penyimpanan | 10 GB ruang kosong (bertambah seiring riwayat CVE, laporan, dan data percakapan) |
-| GPU | Tidak wajib. Opsional — hanya relevan jika Anda menjalankan server LLM lokal yang dipercepat GPU |
-| Sistem Operasi | Windows 10/11 64-bit, atau distribusi Linux 64-bit modern |
-| Python | 3.11 atau lebih baru (3.12 direkomendasikan) — dibutuhkan oleh kumpulan dependensi yang dikunci (pinned) di `requirements.txt` |
-| PostgreSQL | 14 atau lebih baru |
-| Konektivitas Jaringan | Akses HTTPS keluar (outbound) ke NVD API, feed CISA KEV, dan (jika digunakan) FIRST EPSS API; akses keluar ke Telegram Bot API jika menjalankan bot |
+ARGUS adalah platform manajemen kerentanan berbasis Python yang terdiri dari dashboard web Flask, basis data PostgreSQL, bot Telegram opsional, penjadwal job latar belakang (APScheduler), dan asisten AI lokal opsional. ARGUS melacak aset, mencocokkannya terhadap data kerentanan NVD/CISA-KEV/EPSS, menghitung skor risiko, menghasilkan laporan, dan dapat mengirim alert Telegram.
 
-### Persyaratan yang Direkomendasikan
+### Tujuan dokumen ini
 
-| Ukuran deployment | CPU | RAM | Penyimpanan | Catatan |
-|---|---|---|---|---|
-| **Lab kecil / analis tunggal** | 2–4 core | 8 GB | 20 GB SSD | Semuanya (PostgreSQL, ARGUS, LLM lokal opsional) pada satu mesin sudah cukup pada skala ini |
-| **Organisasi menengah** | 4–8 core | 16 GB | 50–100 GB SSD | Jalankan PostgreSQL pada penyimpanan khusus; pertimbangkan host terpisah untuk server LLM jika fitur AI digunakan secara intensif |
-| **Deployment enterprise** | 8+ core | 32 GB+ | 200 GB+ SSD, dengan target backup | Host basis data terpisah, host inferensi LLM terpisah, reverse proxy di depan dashboard, monitoring dan agregasi log |
+Ini adalah manual instalasi lengkap dan mandiri untuk ARGUS. Setiap perintah dalam dokumen ini diperiksa terhadap apa yang **benar-benar dilakukan** kode sumber ARGUS — bukan terhadap cara instalasi proyek Flask/PostgreSQL generik pada umumnya. Di mana pun perilaku kode yang sebenarnya lebih ketat, lebih rapuh, atau berbeda dari yang diharapkan, hal itu dijelaskan secara eksplisit, karena celah-celah persis itulah yang menyebabkan kegagalan instalasi nyata di masa lalu (tabel hilang, nama basis data salah, `psql` tidak ditemukan, kegagalan skema yang senyap, dan lainnya — lihat [§17 Pemecahan Masalah](#17-pemecahan-masalah)).
 
-**Catatan perangkat keras berdasarkan beban kerja:**
+### Audiens yang dituju
 
-- **Beban kerja AI** — Inferensi LLM lokal berbasis CPU dapat digunakan untuk chat bervolume rendah dan analisis CVE latar belakang, tetapi akan lambat untuk model yang lebih besar; GPU dengan VRAM yang cukup untuk model pilihan Anda secara dramatis meningkatkan latensi respons. Lihat [§8 Instalasi AI](#8-instalasi-ai) untuk panduan ukuran model.
-- **Basis data berukuran besar** — Performa PostgreSQL berskala sesuai RAM yang tersedia untuk shared buffer dan ukuran cache efektif; lihat [§21 Rekomendasi Performa](#21-rekomendasi-performa) untuk panduan tuning setelah jumlah baris tabel `matches`/`cves` Anda tumbuh hingga ratusan ribu.
-- **Laporan historis** — Laporan PDF yang dihasilkan terakumulasi di bawah `bot/dashboard/generated_reports/`; alokasikan penyimpanan sesuai kebutuhan jika Anda menyimpan laporan dalam jangka panjang alih-alih mengarsipkannya secara eksternal.
-- **Inventaris aset berskala besar** — Durasi pemindaian (scan) berskala sesuai jumlah aset dan batas rate limit NVD API (lihat [§9](#9-konfigurasi-api-eksternal)); kunci API NVD sangat direkomendasikan setelah Anda memiliki lebih dari beberapa aset.
+Panduan ini **tidak mengasumsikan pengetahuan PostgreSQL sebelumnya** dan **tidak mengasumsikan pengetahuan ARGUS sebelumnya**. Ditulis untuk:
 
----
+- Pemula dan pelajar yang menginstal aplikasi Python berbasis basis data untuk pertama kalinya
+- Peneliti dan analis keamanan yang menyiapkan ARGUS untuk penggunaan sendiri
+- Developer dan kontributor yang menginginkan lingkungan pengembangan lokal yang benar
+- Administrator sistem yang men-deploy ARGUS untuk tim atau organisasi
+- Enterprise dan organisasi pemerintah yang mengevaluasi atau men-deploy ARGUS dalam skala besar
 
-## 2. Sistem Operasi yang Didukung
+### Jenis instalasi yang dicakup
 
-| Platform | Status |
-|---|---|
-| Ubuntu 22.04 / 24.04 LTS | Didukung |
-| Debian 11 / 12 | Didukung |
-| Fedora (rilis terbaru) | Didukung |
-| Distribusi kompatibel RHEL (RHEL, Rocky Linux, AlmaLinux) | Didukung |
-| Windows 10 (64-bit) | Didukung |
-| Windows 11 | Didukung |
-| macOS | Tidak dibahas secara eksplisit di sini, tetapi seharusnya bekerja dengan instruksi Linux yang disubstitusi dengan ekuivalen Homebrew (belum diuji oleh proyek ini) |
+| Jenis instalasi | Artinya | Dicakup di |
+|---|---|---|
+| **Development** | Menjalankan ARGUS langsung dengan `python app.py` / `python main.py` di mesin Anda sendiri, untuk pengujian dan kontribusi | §4–§16 |
+| **Production** | Menjalankan ARGUS di belakang reverse proxy dan server WSGI sungguhan, di server khusus, dengan basis data yang difirewall | §18 |
+| **Offline** | Menginstal ARGUS di mesin dengan akses internet terbatas atau tanpa akses internet | Disebutkan inline di mana pun sebuah langkah membutuhkan akses internet (PyPI, NVD, Telegram, unduhan LLM) |
+| **AI-enabled** | Menginstal dan menghubungkan server LLM lokal sehingga chat AI Security Copilot dan analisis CVE latar belakang berfungsi | Dijelaskan di [§13 Konfigurasi Environment](#13-konfigurasi-environment) — lihat variabel `LLM_URL` dan [§15.4](#154-server-ai-opsional) |
 
-ARGUS adalah aplikasi Python murni tanpa ekstensi terkompilasi khusus OS di luar yang sudah disediakan `psycopg2-binary`, `matplotlib`, dan `pillow` sebagai wheel prebuilt, sehingga tidak memerlukan perubahan kode khusus platform. Instruksi di bawah dipisahkan menjadi **Linux** dan **Windows** di mana pun langkah-langkahnya benar-benar berbeda.
+### Filosofi instalasi
+
+Kode ARGUS sendiri **tidak sepenuhnya self-healing (memperbaiki diri sendiri)**. Sebagian di antaranya bersifat idempoten dan aman dijalankan ulang (dashboard memperbaiki *kolom* yang hilang setiap kali dimulai), tetapi tiga tabel terpenting di seluruh basis data — `assets`, `cves`, dan `matches` — **hanya pernah dibuat oleh satu file spesifik**, `bot/database/schema.sql`, dan tidak ada apa pun lain dalam basis kode yang akan membuatnya untuk Anda. Jika Anda melewatkan langkah tunggal ini, ARGUS sering kali *tampak* berhasil dimulai dan kemudian gagal kemudian, membingungkan, pada saat pertama kali sebuah halaman atau perintah menyentuh data nyata. Panduan ini disusun secara khusus agar Anda tidak dapat mencapai mode kegagalan tersebut: setiap langkah diurutkan, diverifikasi, dan diperiksa sebelum Anda melanjutkan ke langkah berikutnya.
 
 ---
 
-## 3. Dependensi Perangkat Lunak
+## 2. Ringkasan Instalasi
 
-| Dependensi | Mengapa dibutuhkan |
-|---|---|
-| **Python 3.11+** | Runtime untuk dashboard Flask dan bot Telegram |
-| **pip** | Memasang dependensi Python dari `requirements.txt` |
-| **PostgreSQL 14+** | Datastore utama untuk seluruh data ARGUS — aset, temuan, CVE, laporan, pengguna, percakapan AI |
-| **Git** | Meng-clone dan memperbarui repositori ARGUS |
-| **Server LLM yang kompatibel dengan OpenAI** (misalnya server `llama.cpp`, atau Ollama yang mengekspos endpoint kompatibel OpenAI-nya) | Menjalankan chat AI Security Copilot dan analisis CVE otomatis. Opsional — ARGUS berjalan sepenuhnya tanpanya, dengan fitur AI dinonaktifkan |
-| **Visual C++ Runtime** (khusus Windows) | Beberapa paket Python yang dikunci (misalnya `psycopg2-binary`, `matplotlib`, `numpy`, `pillow`) menyediakan wheel Windows prebuilt yang ter-link ke Visual C++ runtime; pasang [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist) jika Anda mengalami error pemuatan DLL |
-| **Build tools** (khusus Linux, kadang-kadang) | Jika wheel prebuilt tidak tersedia untuk kombinasi Python/OS Anda yang spesifik, `pip` akan mencoba mengompilasi paket dari sumber kode, yang memerlukan compiler C dan header client PostgreSQL. Lihat [§18 Pemecahan Masalah](#18-pemecahan-masalah) |
+Diagram di bawah ini adalah urutan persis yang diikuti panduan ini, dan urutan persis yang dibutuhkan kode sumber ARGUS. Melewatkan atau mengubah urutan langkah mana pun dalam blok "Database setup" adalah penyebab tunggal paling umum kegagalan instalasi.
 
-> `requirements.txt` milik ARGUS **tidak** menyertakan server WSGI produksi (misalnya Gunicorn) atau toolchain Docker. Keduanya dibahas terpisah di [§23](#23-deployment-produksi) dan [§22](#22-instalasi-docker-dukungan-masa-depan), karena keduanya merupakan pilihan operasional, bukan dependensi aplikasi.
+```mermaid
+flowchart TD
+    A[Unduh kode sumber ARGUS] --> B[Instal Python 3.11+]
+    B --> C[Buat & aktifkan virtual environment]
+    C --> D[Instal dependensi Python]
+    D --> E[Instal PostgreSQL]
+    E --> F[Verifikasi PostgreSQL terinstal dan berjalan]
+    F --> G[Buat role PostgreSQL untuk ARGUS]
+    G --> H[Buat basis data argus_db]
+    H --> I["Terapkan schema.sql\n(membuat assets, cves, matches,\nalerts, reports, users + view)"]
+    I --> J["Jalankan migrate.py\n(membuat tabel AI/risiko,\nmemperbaiki basis data lama)"]
+    J --> K[Verifikasi tabel ada dengan \\dt]
+    K --> L[Buat dan isi .env]
+    L --> M[Verifikasi variabel environment]
+    M --> N[Jalankan dashboard: python app.py]
+    N --> O["Login dan pastikan dashboard dimuat\n(ini bukti nyata bahwa schema.sql berhasil)"]
+    O --> P[Opsional: jalankan bot Telegram]
+    P --> Q[Opsional: hubungkan server LLM lokal]
+    Q --> R[Jalankan daftar periksa verifikasi lengkap]
 
----
-
-## 4. Instalasi Proyek
-
-### 4.1 Clone repositori
-
-```bash
-git clone <repo-url> argus
-cd argus
+    style I fill:#3a1a1a,color:#fff
+    style J fill:#3a1a1a,color:#fff
+    style K fill:#1a3a1a,color:#fff
 ```
 
-Ini membuat direktori `argus/` tingkat atas yang berisi `app.py` (entry point dashboard), `requirements.txt`, dan paket `bot/`, yang berisi entry point bot Telegram (`bot/main.py`) dan setiap modul bersama (akses basis data, scanner, AI, laporan, scheduler).
+**Mengapa langkah yang disorot penting:** langkah I (`schema.sql`) adalah satu-satunya tempat di seluruh basis kode yang membuat `assets`, `cves`, dan `matches`. Langkah J (`migrate.py`) bergantung pada ketiga tabel tersebut sudah ada — ia hanya menambahkan kolom dan constraint padanya, dan membuat tabel AI/risiko terpisah dari awal. Langkah K adalah titik pemeriksaan Anda: jika `\dt` tidak menampilkan semua tabel yang diharapkan, berhenti dan perbaiki sebelum menginstal apa pun lagi.
 
-### 4.2 Buat virtual environment
+---
 
-Mengisolasi dependensi ARGUS dalam virtual environment menghindari konflik dengan proyek Python lain pada mesin yang sama.
+## 3. Persyaratan Sistem
 
-**Linux:**
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
+### Minimum
 
-**Windows (PowerShell):**
+| Komponen | Persyaratan | Alasan |
+|---|---|---|
+| CPU | 2 core | Flask, PostgreSQL, dan scheduler bersifat ringan; 2 core cukup untuk deployment kecil tunggal |
+| RAM | 4 GB | PostgreSQL, proses Python, dan OS semuanya butuh ruang gerak; di bawah ini, pengaturan memori default PostgreSQL dapat menyebabkan swapping |
+| Penyimpanan | 5 GB ruang kosong | Python, dependensinya, PostgreSQL, dan basis data kerentanan kecil mudah muat; data CVE bertambah seiring waktu (lihat `DATABASE.md` jika tersedia) |
+| Python | 3.11 atau lebih baru | Versi dependensi ARGUS (dikunci di `requirements.txt`, misalnya `Flask==3.1.3`, `psycopg2-binary==2.9.12`) diuji terhadap Python modern; versi Python yang lebih lama tidak didukung |
+| PostgreSQL | 13 atau lebih baru | Skema ARGUS menggunakan SQL PostgreSQL modern standar (`SERIAL`, `TIMESTAMPTZ`, indeks parsial, blok `DO $$ ... $$`) — tidak ada fitur khusus-versi yang eksotis, tetapi rilis PostgreSQL yang sangat lama tidak didukung dan tidak diuji |
+| Sistem Operasi | Windows 10/11 (64-bit) atau distribusi Linux 64-bit modern | ARGUS adalah Python murni tanpa kode khusus OS; satu-satunya bagian panduan ini yang khusus-platform adalah *cara Anda menginstal dan mengelola* Python/PostgreSQL |
+| Jaringan | Akses HTTPS keluar (outbound) ke `services.nvd.nist.gov`, feed KEV CISA, dan (jika menggunakan Telegram) `api.telegram.org` | Dibutuhkan untuk data kerentanan dan agar bot berfungsi; tidak dibutuhkan hanya untuk melihat data yang sudah ada di dashboard |
+| GPU | Tidak dibutuhkan | ARGUS sendiri tidak melakukan pekerjaan GPU apa pun; GPU hanya relevan jika Anda menginstal server LLM lokal yang dipercepat GPU (opsional, lihat §15.4) |
+
+### Direkomendasikan
+
+| Komponen | Persyaratan |
+|---|---|
+| CPU | 4 core |
+| RAM | 8 GB (atau lebih jika Anda berencana menjalankan server LLM lokal di mesin yang sama) |
+| Penyimpanan | 20 GB SSD |
+| PostgreSQL | Terinstal di mesin yang sama untuk deployment kecil, atau host basis data khusus untuk penggunaan tim |
+| AI | Server LLM lokal (`llama.cpp` atau Ollama) dengan model terkuantisasi setidaknya 7–8B parameter jika Anda menginginkan AI Security Copilot |
+
+### Enterprise
+
+| Komponen | Persyaratan |
+|---|---|
+| CPU | 8+ core |
+| RAM | 32 GB+ |
+| Penyimpanan | 200 GB+ SSD dengan target backup terjadwal |
+| Deployment | Host PostgreSQL khusus, reverse proxy di depan dashboard, terminasi HTTPS, port basis data difirewall — lihat [§18 Deployment Produksi](#18-deployment-produksi) |
+| AI | Host inferensi LLM khusus, hanya terjangkau dari jaringan internal |
+
+---
+
+## 4. Instalasi Python
+
+### Tujuan
+
+ARGUS adalah aplikasi Python. Python harus terinstal dan dapat dijangkau dengan benar dari command line Anda sebelum hal lain apa pun dalam panduan ini akan berfungsi.
+
+### Penjelasan
+
+ARGUS membutuhkan **Python 3.11 atau lebih baru**. Menginstal Python saja tidak cukup — Python juga harus ditambahkan ke `PATH` sistem Anda (daftar direktori yang dicari shell Anda saat Anda mengetik perintah), atau terminal Anda tidak akan mengenali perintah `python` atau `pip` meskipun Python secara teknis sudah terinstal.
+
+### Windows
+
+**Perintah / langkah:**
+
+1. Unduh installer dari [halaman unduhan resmi Python](https://www.python.org/downloads/).
+2. Jalankan installer. **Centang kotak berlabel "Add python.exe to PATH"** di bagian bawah layar pertama — satu kotak centang ini bertanggung jawab atas sebagian besar error "python is not recognized" jika tidak dicentang.
+3. Klik "Install Now".
+
+**Output yang diharapkan:** Setelah instalasi, buka jendela Command Prompt atau PowerShell **baru** (jendela yang sudah terbuka tidak melihat `PATH` yang telah diperbarui) dan jalankan:
+
 ```powershell
-py -m venv venv
-venv\Scripts\Activate.ps1
+python --version
 ```
 
-**Windows (Command Prompt):**
-```cmd
-py -m venv venv
-venv\Scripts\activate.bat
+Output yang diharapkan:
+
+```
+Python 3.11.x
 ```
 
-Anda akan melihat `(venv)` ditambahkan di depan prompt shell Anda setelah diaktifkan. Setiap perintah `pip` dan `python` pada sisa panduan ini mengasumsikan virtual environment sedang aktif.
+(atau 3.12.x, dst. — versi 3.11+ apa pun)
 
-### 4.3 Pasang dependensi
+**Verifikasi:**
 
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
+```powershell
+pip --version
 ```
 
-Ini memasang Flask, Flask-Login, Flask-WTF, `psycopg2-binary`, APScheduler, `python-telegram-bot`, ReportLab, matplotlib, dan dependensi transitifnya — `requirements.txt` yang sama digunakan baik oleh dashboard maupun bot Telegram, sehingga satu instalasi mencakup keduanya.
+Output yang diharapkan:
 
-### 4.4 Siapkan file environment
-
-ARGUS membaca konfigurasi dari file `.env` di root proyek (dimuat melalui `python-dotenv`). Buat file tersebut sekarang; referensi variabel lengkap ada di [§7](#7-konfigurasi-environment).
-
-```bash
-touch .env        # Linux/macOS
-type nul > .env    # Windows Command Prompt
 ```
-
-Jangan commit file ini — `.gitignore` sudah mengecualikan `.env` secara default.
-
----
-
-## 5. Instalasi PostgreSQL
+pip 2x.x.x from C:\...\Python31x\Lib\site-packages\pip (python 3.1x)
+```
 
 ### Linux (Ubuntu/Debian)
 
 ```bash
 sudo apt update
-sudo apt install -y postgresql postgresql-contrib
-sudo systemctl enable --now postgresql
+sudo apt install -y python3 python3-pip python3-venv
+```
+
+**Verifikasi:**
+
+```bash
+python3 --version
+pip3 --version
+```
+
+Output yang diharapkan:
+
+```
+Python 3.11.x
+pip 2x.x.x from ... (python 3.11)
 ```
 
 ### Linux (Fedora/kompatibel RHEL)
 
 ```bash
+sudo dnf install -y python3 python3-pip
+```
+
+### Virtual environment (kedua platform)
+
+**Tujuan:** Virtual environment menjaga dependensi Python milik ARGUS terisolasi dari apa pun lain yang terinstal di sistem Anda, sehingga versi dependensi tepat yang dikunci ARGUS (dari `requirements.txt`) tidak berkonflik dengan proyek Python lain.
+
+**Perintah:**
+
+```bash
+# Dari dalam folder proyek ARGUS
+python3 -m venv venv          # Linux/macOS
+python -m venv venv           # Windows
+```
+
+Aktifkan:
+
+```bash
+source venv/bin/activate      # Linux/macOS
+venv\Scripts\Activate.ps1     # Windows PowerShell
+venv\Scripts\activate.bat     # Windows Command Prompt
+```
+
+**Output yang diharapkan:** Prompt terminal Anda sekarang dimulai dengan `(venv)`. Setiap perintah `python` dan `pip` untuk sisa panduan ini mengasumsikan ini aktif.
+
+**Verifikasi:**
+
+```bash
+which python      # Linux/macOS — seharusnya menunjuk ke dalam folder venv/
+where python       # Windows — seharusnya menunjuk ke dalam folder venv\
+```
+
+### Kesalahan umum
+
+| Kesalahan | Gejala | Perbaikan |
+|---|---|---|
+| Lupa mencentang "Add to PATH" di Windows | `'python' is not recognized as an internal or external command` | Jalankan ulang installer, pilih "Modify", dan aktifkan opsi PATH — atau instal ulang dari awal |
+| Menggunakan jendela terminal lama setelah instalasi | `python` masih tidak ditemukan meskipun "baru saja diinstal" | Tutup dan buka ulang terminal Anda (perubahan PATH tidak berlaku pada jendela yang sudah terbuka) |
+| Lupa mengaktifkan virtual environment | Paket "berhasil" terinstal tetapi ARGUS masih mengatakan modul hilang saat Anda menjalankannya | Jalankan ulang perintah `activate` untuk platform Anda sebelum setiap `pip install` dan setiap `python app.py` |
+| Menggunakan `python` di Linux padahal hanya `python3` yang ada | `python: command not found` | Gunakan `python3` dan `pip3` secara eksplisit di Linux, seperti ditunjukkan di atas |
+
+### Pemulihan
+
+Jika Python tampak terinstal tetapi perintah tidak dikenali, verifikasi lokasi instalasi sebenarnya dan tambahkan secara manual ke `PATH` (Windows: System Properties → Environment Variables → `Path` → New → folder yang berisi `python.exe`), lalu buka terminal baru dan uji ulang.
+
+### Praktik terbaik
+
+- Selalu bekerja di dalam virtual environment untuk proyek ini.
+- Jangan instal dependensi ARGUS ke Python sistem-lebar Anda — ini dapat secara diam-diam merusak alat lain di mesin Anda yang juga menggunakan Python.
+
+**Lanjutkan ke [§5 Instalasi PostgreSQL](#5-instalasi-postgresql).**
+
+---
+
+## 5. Instalasi PostgreSQL
+
+### Tujuan
+
+ARGUS menyimpan 100% datanya — aset, kerentanan, temuan, laporan, akun pengguna, percakapan AI — dalam satu basis data PostgreSQL tunggal. Tidak ada datastore lain di mana pun dalam ARGUS. Jika PostgreSQL tidak terinstal dan dikonfigurasi dengan benar, tidak ada hal lain dalam panduan ini yang akan berfungsi.
+
+### Penjelasan — konsep PostgreSQL, dijelaskan dari nol
+
+Jika Anda belum pernah menggunakan server basis data sebelumnya, istilah-istilah ini akan sering muncul di panduan ini dan dalam pesan error ARGUS sendiri. Baca bagian ini sekali, dengan saksama — ini akan menyelamatkan Anda dari hampir setiap error yang membingungkan nanti.
+
+| Istilah | Apa artinya sebenarnya |
+|---|---|
+| **Server** | Program latar belakang (`postgres`) yang berjalan terus-menerus di mesin Anda (atau mesin lain), mendengarkan koneksi. Jika ini tidak berjalan, *tidak ada apa pun* yang dapat berbicara dengan PostgreSQL — bukan `psql`, bukan ARGUS, tidak ada apa pun. |
+| **Client** | Program apa pun yang terhubung *ke* server PostgreSQL. `psql` (alat command-line) adalah client. ARGUS sendiri juga merupakan client — ia terhubung ke PostgreSQL persis dengan cara yang sama seperti `psql`, hanya dari kode Python alih-alih terminal. |
+| **Database (basis data)** | Wadah bernama untuk tabel, di dalam server PostgreSQL. Satu server PostgreSQL dapat menampung banyak basis data terpisah. ARGUS mengharapkan satu basis data spesifik, secara default bernama `argus_db` (lihat [§9](#9-pembuatan-basis-data)). |
+| **Role / User** | Dalam PostgreSQL, "role" dan "user" merujuk pada konsep dasar yang sama — sebuah akun yang dapat login dan/atau memiliki objek basis data. Panduan ini membuat role khusus untuk ARGUS alih-alih menggunakan role default `postgres` yang serba bisa untuk penggunaan sehari-hari. |
+| **Schema** | Namespace *di dalam* basis data yang mengelompokkan tabel bersama-sama (schema default PostgreSQL disebut `public`). ARGUS menempatkan setiap tabelnya di schema default `public` — Anda tidak perlu membuat atau mengonfigurasi schema apa pun sendiri. |
+| **Owner (pemilik)** | Setiap tabel (dan setiap basis data) memiliki pemilik — role yang memiliki kendali penuh atasnya. Role yang Anda gunakan untuk menjalankan `schema.sql` sebaiknya sama dengan role yang digunakan ARGUS sendiri untuk terhubung, atau Anda dapat mengalami error izin nanti. |
+| **Host** | Alamat jaringan mesin yang menjalankan server PostgreSQL. Untuk instalasi mesin tunggal normal, ini adalah `localhost` (komputer Anda sendiri). |
+| **Port** | Port jaringan tempat PostgreSQL mendengarkan. Default standar PostgreSQL adalah **5432**. ARGUS juga default ke `5432` jika Anda tidak menyetel `DB_PORT` (lihat [§13](#13-konfigurasi-environment)). |
+| **`psql`** | Client command-line resmi milik PostgreSQL. Anda menggunakannya untuk membuat basis data/role dan menjalankan `schema.sql`. Ini terinstal secara otomatis bersama server PostgreSQL baik di Windows maupun Linux. |
+
+### Instalasi Windows
+
+1. Unduh installer dari [halaman unduhan resmi PostgreSQL](https://www.postgresql.org/download/windows/).
+2. Jalankan installer.
+3. Saat diminta, **setel dan ingat password untuk akun superuser `postgres`** — Anda akan membutuhkannya di [§8](#8-menghubungkan-ke-postgresql). Catat di tempat yang aman; melupakannya adalah salah satu penghambat instalasi paling umum.
+4. Pertahankan port default (**5432**) kecuali Anda punya alasan spesifik untuk mengubahnya.
+5. Di layar "Select Components", pastikan **Command Line Tools** dicentang — ini yang menginstal `psql`.
+6. Selesaikan instalasi. Di Windows, installer biasanya menambahkan folder `bin` PostgreSQL ke `PATH` Anda secara otomatis, tetapi ini tidak dijamin di setiap versi — lihat [§6](#6-verifikasi-postgresql) untuk memastikan.
+
+### Instalasi Linux (Ubuntu/Debian)
+
+```bash
+sudo apt update
+sudo apt install -y postgresql postgresql-contrib
+```
+
+Ini menginstal baik **server** PostgreSQL (yang dimulai otomatis sebagai layanan sistem) maupun `psql` (**client**).
+
+### Instalasi Linux (Fedora/kompatibel RHEL)
+
+```bash
 sudo dnf install -y postgresql-server postgresql-contrib
 sudo postgresql-setup --initdb
-sudo systemctl enable --now postgresql
 ```
+
+Di Fedora/RHEL, server terinstal tetapi **tidak dimulai atau diaktifkan** secara otomatis — Anda harus melakukannya sendiri (dibahas di [§7](#7-layanan-postgresql)).
+
+### Output yang diharapkan
+
+Tidak ada satu output "sukses" tunggal untuk instalasi itu sendiri — keberhasilan dikonfirmasi oleh langkah verifikasi di [§6](#6-verifikasi-postgresql) dan [§7](#7-layanan-postgresql). Jangan lewati langkah tersebut.
+
+### Kesalahan umum
+
+| Kesalahan | Gejala | Bagian dengan perbaikan |
+|---|---|---|
+| Lupa password `postgres` selama instalasi Windows | Tidak dapat login sama sekali setelahnya | Instal ulang, atau reset password menggunakan `pg_hba.conf` — lihat [§8](#8-menghubungkan-ke-postgresql) |
+| Tidak menginstal Command Line Tools di Windows | `psql` tidak ditemukan meskipun PostgreSQL "sudah terinstal" | Lihat [§6](#6-verifikasi-postgresql) untuk perbaikan PATH, atau jalankan ulang installer dan tambahkan komponennya |
+| Mengasumsikan server dimulai otomatis di Fedora/RHEL | Setiap upaya koneksi gagal dengan "connection refused" | Lihat [§7](#7-layanan-postgresql) |
+
+### Pemulihan
+
+Jika installer gagal di tengah jalan di Windows, uninstal melalui "Add or Remove Programs" dan jalankan ulang installer sebagai Administrator. Di Linux, `sudo apt remove --purge postgresql postgresql-contrib` (atau setara `dnf`) diikuti instalasi ulang yang bersih biasanya lebih cepat daripada mencoba memperbaiki instalasi yang setengah jalan.
+
+### Praktik terbaik
+
+- Catat password `postgres` segera selama instalasi — Anda akan membutuhkannya beberapa kali dalam panduan ini.
+- Jangan ubah port default kecuali Anda punya alasan spesifik; ARGUS default ke `5432` dan mengubahnya berarti Anda juga harus menyetel `DB_PORT` nanti.
+
+**Lanjutkan ke [§6 Verifikasi PostgreSQL](#6-verifikasi-postgresql).**
+
+---
+
+## 6. Verifikasi PostgreSQL
+
+### Tujuan
+
+Pastikan client command-line `psql` benar-benar dapat dijangkau dari terminal Anda sebelum mencoba menggunakannya. Ini adalah titik kegagalan awal paling umum.
 
 ### Windows
 
-1. Unduh installer dari [halaman unduhan resmi PostgreSQL](https://www.postgresql.org/download/windows/).
-2. Jalankan installer, pertahankan port default (`5432`) kecuali ada konflik.
-3. Setel password untuk superuser `postgres` saat diminta — catat password tersebut; Anda akan membutuhkannya di bawah.
-4. Pastikan "Command Line Tools" dipilih dalam daftar komponen sehingga `psql` tersedia di `PATH` Anda.
+```powershell
+where psql
+```
 
-### Pembuatan basis data dan user (semua platform, via `psql`)
+**Output yang diharapkan:**
 
-Hubungkan sebagai superuser PostgreSQL:
+```
+C:\Program Files\PostgreSQL\1x\bin\psql.exe
+```
+
+Jika sebaliknya Anda melihat:
+
+```
+INFO: Could not find files for the given pattern(s).
+```
+
+`psql` tidak ada di `PATH` Anda.
+
+### Linux
+
+```bash
+which psql
+```
+
+**Output yang diharapkan:**
+
+```
+/usr/bin/psql
+```
+
+Jika sebaliknya Anda melihat tidak ada apa pun (output kosong) atau `which: no psql in (...)`, `psql` tidak terinstal atau tidak ada di `PATH` Anda.
+
+### Pemulihan — pemecahan masalah PATH
+
+**Windows:** Temukan secara manual folder `bin` PostgreSQL (umumnya `C:\Program Files\PostgreSQL\<versi>\bin`), lalu:
+
+1. Cari "Environment Variables" di menu Start → "Edit the system environment variables".
+2. Klik "Environment Variables".
+3. Di bawah "System variables", pilih `Path`, klik "Edit", klik "New", dan tempel path folder `bin`.
+4. Klik OK di setiap dialog, lalu **tutup dan buka ulang terminal Anda**.
+5. Jalankan ulang `where psql`.
+
+**Linux:** Jika PostgreSQL terinstal via `apt`/`dnf` tetapi `psql` masih tidak ditemukan, instalasi kemungkinan besar gagal di tengah jalan — jalankan ulang perintah instalasi dari [§5](#5-instalasi-postgresql) dan periksa error dalam outputnya.
+
+### Verifikasi
+
+Setelah `psql` ditemukan, konfirmasi versinya:
+
+```bash
+psql --version
+```
+
+Output yang diharapkan (nomor versi akan bervariasi):
+
+```
+psql (PostgreSQL) 1x.x
+```
+
+**Lanjutkan ke [§7 Layanan PostgreSQL](#7-layanan-postgresql).**
+
+---
+
+## 7. Layanan PostgreSQL
+
+### Tujuan
+
+`psql` yang terinstal **tidak** berarti **server** PostgreSQL sedang berjalan. Ini adalah dua hal yang terpisah (lihat penjelasan Server vs. Client di [§5](#5-instalasi-postgresql)). Bagian ini memastikan server itu sendiri benar-benar aktif dan mendengarkan.
+
+### Windows — `services.msc`
+
+1. Tekan `Win + R`, ketik `services.msc`, tekan Enter.
+2. Temukan layanan bernama seperti **postgresql-x64-1x**.
+3. Kolom "Status"-nya seharusnya bertuliskan **Running**.
+
+**Jika tidak berjalan:**
+
+1. Klik kanan layanan → **Start**.
+2. Agar mulai otomatis pada setiap boot, klik kanan → **Properties** → setel "Startup type" ke **Automatic**.
+
+### Linux — `systemctl`
+
+**Periksa status:**
+
+```bash
+sudo systemctl status postgresql
+```
+
+**Output yang diharapkan** (kutipan):
+
+```
+● postgresql.service - PostgreSQL RDBMS
+     Loaded: loaded (...)
+     Active: active (running) since ...
+```
+
+**Jika bertuliskan `inactive (dead)` atau `failed`:**
+
+```bash
+sudo systemctl start postgresql
+sudo systemctl enable postgresql   # agar juga mulai otomatis saat reboot
+```
+
+**Me-restart layanan** (berguna setelah perubahan konfigurasi):
+
+```bash
+sudo systemctl restart postgresql
+```
+
+### Memverifikasi port yang didengarkan
+
+Pastikan PostgreSQL benar-benar mendengarkan di port 5432 (defaultnya):
+
+**Linux:**
+
+```bash
+sudo ss -ltnp | grep 5432
+```
+
+atau, jika `ss` tidak tersedia:
+
+```bash
+sudo netstat -ltnp | grep 5432
+```
+
+**Output yang diharapkan** (kutipan):
+
+```
+LISTEN  0  244  127.0.0.1:5432  0.0.0.0:*  users:(("postgres",pid=1234,fd=7))
+```
+
+**Windows (PowerShell):**
+
+```powershell
+netstat -ano | findstr 5432
+```
+
+**Output yang diharapkan:** setidaknya satu baris menunjukkan `LISTENING` pada port 5432.
+
+### Kesalahan umum
+
+| Kesalahan | Gejala | Perbaikan |
+|---|---|---|
+| Mengasumsikan PostgreSQL mulai saat boot di Fedora/RHEL | Berfungsi hari ini, gagal setelah reboot | `sudo systemctl enable postgresql` |
+| Firewall memblokir port 5432 (jarang pada koneksi `localhost`, lebih umum jika terhubung dari mesin lain) | Server berjalan, `netstat`/`ss` menunjukkannya mendengarkan, tetapi koneksi jarak jauh tetap timeout | Lihat entri firewall Windows/Linux di [§17 Pemecahan Masalah](#17-pemecahan-masalah) |
+| Beberapa versi PostgreSQL terinstal berdampingan | Situasi "layanan mana yang sebenarnya berjalan" yang membingungkan | Periksa `services.msc` / `systemctl list-units 'postgresql*'` untuk setiap versi yang terinstal dan pastikan hanya yang ingin Anda gunakan yang berjalan |
+
+### Pemulihan
+
+Jika layanan menolak untuk dimulai, periksa lognya:
+
+**Linux:**
+
+```bash
+sudo journalctl -u postgresql -n 50
+```
+
+**Windows:** Periksa subfolder `log` direktori data PostgreSQL (umumnya `C:\Program Files\PostgreSQL\<versi>\data\log`) untuk file log terbaru.
+
+**Lanjutkan ke [§8 Menghubungkan ke PostgreSQL](#8-menghubungkan-ke-postgresql).**
+
+---
+
+## 8. Menghubungkan ke PostgreSQL
+
+### Tujuan
+
+Pastikan Anda benar-benar dapat mengautentikasi ke server PostgreSQL yang sedang berjalan menggunakan akun superuser `postgres` bawaan, sebelum membuat apa pun yang spesifik-ARGUS.
+
+### Perintah
 
 ```bash
 psql -U postgres
 ```
 
-Kemudian jalankan:
+### Penjelasan tentang prompt password
+
+Anda akan diminta:
+
+```
+Password for user postgres:
+```
+
+Ketik password yang Anda setel selama instalasi ([§5](#5-instalasi-postgresql)) dan tekan Enter. **Tidak ada apa pun yang akan muncul di layar saat Anda mengetik ini** — tidak ada titik, tidak ada asterisk. Ini perilaku `psql` normal, bukan bug.
+
+### Output yang diharapkan
+
+```
+psql (1x.x)
+Type "help" for help.
+
+postgres=#
+```
+
+Prompt `postgres=#` mengonfirmasi Anda sekarang terhubung, sebagai role `postgres`, ke basis data default `postgres`.
+
+### Pesan kegagalan umum, dijelaskan
+
+| Pesan | Artinya | Perbaikan |
+|---|---|---|
+| `psql: error: connection to server ... failed: FATAL: password authentication failed for user "postgres"` | Password yang Anda ketik salah | Ketik ulang dengan saksama (ingat: tidak ada apa pun yang ditampilkan saat Anda mengetik). Jika Anda benar-benar lupa passwordnya, lihat Pemulihan di bawah. |
+| `psql: error: connection to server at "localhost" (...), port 5432 failed: Connection refused` | **Server** PostgreSQL tidak berjalan, atau mendengarkan di port yang berbeda | Kembali ke [§7](#7-layanan-postgresql) dan pastikan layanan berjalan |
+| `psql: error: connection to server ... failed: could not translate host name "localhost" to address` | Masalah DNS/jaringan lokal yang tidak biasa | Coba `psql -U postgres -h 127.0.0.1` sebagai gantinya |
+| `'psql' is not recognized...` | `psql` tidak ada di `PATH` Anda | Kembali ke [§6](#6-verifikasi-postgresql) |
+
+### Pemulihan — password `postgres` yang terlupa
+
+Anda dapat mereset dengan `ALTER USER`, tetapi pertama-tama Anda membutuhkan satu koneksi yang berfungsi untuk melakukannya. Jalur termudah adalah menggunakan `pgAdmin` (terinstal bersama PostgreSQL di Windows) yang mungkin menyimpan kredensial tersimpan, atau — di Linux — secara sementara sunting `pg_hba.conf` untuk mengizinkan akses lokal berbasis-trust, reset password, lalu kembalikan perubahan:
+
+```bash
+# Temukan pg_hba.conf (umumnya /etc/postgresql/<versi>/main/pg_hba.conf di Debian/Ubuntu)
+sudo nano /etc/postgresql/*/main/pg_hba.conf
+```
+
+Ubah sementara metode koneksi lokal menjadi `trust`, lalu:
+
+```bash
+sudo systemctl restart postgresql
+psql -U postgres
+```
+
+Setelah terhubung:
 
 ```sql
-CREATE USER argus_user WITH PASSWORD 'change-this-password';
-CREATE DATABASE argus_db OWNER argus_user ENCODING 'UTF8';
-GRANT ALL PRIVILEGES ON DATABASE argus_db TO argus_user;
+ALTER USER postgres WITH PASSWORD 'password-baru-anda';
+```
+
+Kemudian kembalikan `pg_hba.conf` ke `md5` atau `scram-sha-256` dan restart PostgreSQL lagi.
+
+### Verifikasi
+
+Setelah terhubung, keluar dengan:
+
+```
 \q
 ```
 
-**Encoding basis data.** Gunakan `UTF8` seperti ditunjukkan — deskripsi CVE dan catatan aset dapat berisi berbagai karakter Unicode, dan encoding basis data non-UTF8 akan menyebabkan kegagalan penyisipan data (insert).
-
-**Rekomendasi zona waktu.** ARGUS menyimpan timestamp sebagai `TIMESTAMPTZ` di seluruh skemanya, sehingga zona waktu server yang dikonfigurasi tidak memengaruhi kebenaran data, tetapi menyetel zona waktu server PostgreSQL ke `UTC` direkomendasikan untuk korelasi log yang konsisten, karena cron job scheduler (lihat [§12](#12-konfigurasi-scheduler)) berjalan pada zona waktu lokal proses scheduler:
-
-```sql
-ALTER SYSTEM SET timezone = 'UTC';
-```
-Restart PostgreSQL setelah perubahan ini agar berlaku.
-
-### Verifikasi konektivitas
-
-```bash
-psql -U argus_user -d argus_db -h localhost -c "SELECT version();"
-```
-
-Anda seharusnya melihat string versi PostgreSQL tercetak. Jika ini gagal, lihat [§18 Pemecahan Masalah](#18-pemecahan-masalah).
-
-### Kesalahan umum
-
-| Kesalahan | Konsekuensi | Perbaikan |
-|---|---|---|
-| Membuat basis data dengan encoding default `SQL_ASCII` | Kegagalan insert pada deskripsi CVE non-ASCII | Buat ulang basis data dengan `ENCODING 'UTF8'` |
-| Membiarkan `pg_hba.conf` PostgreSQL pada autentikasi `peer` untuk koneksi TCP | `psql: FATAL: Peer authentication failed` saat menghubungkan dengan `-h localhost` | Setel baris yang relevan ke `md5` atau `scram-sha-256` dan reload PostgreSQL |
-| Lupa memberikan hak akses (grant) setelah membuat basis data dengan owner yang berbeda | Error permission-denied saat ARGUS mencoba membuat tabel | Jalankan ulang pernyataan `GRANT ALL PRIVILEGES`, atau buat ulang basis data dengan `OWNER argus_user` seperti ditunjukkan di atas |
+**Lanjutkan ke [§9 Pembuatan Basis Data](#9-pembuatan-basis-data).**
 
 ---
 
-## 6. Inisialisasi Basis Data
+## 9. Pembuatan Basis Data
 
-Skema ARGUS bersifat **self-healing** (memperbaiki diri sendiri) — Anda umumnya tidak perlu menjalankan apa pun secara manual sebelum menjalankan aplikasi.
+### Tujuan
 
-- Saat `app.py` dijalankan, ia memanggil rutinitas internal `_ensure_schema()` yang menerapkan setiap tabel/kolom/indeks yang dibutuhkan dengan pernyataan `CREATE TABLE IF NOT EXISTS` dan `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`. Ini aman dijalankan setiap kali aplikasi dimulai, termasuk terhadap basis data yang sudah mutakhir.
-- `bot/main.py` (bot Telegram) melakukan migrasi setara pada jalur startup-nya sendiri.
-- Sebuah skrip migrasi mandiri, `bot/migrate.py`, menerapkan kumpulan migrasi idempoten yang sama dan dapat dijalankan secara manual — berguna untuk menyiapkan basis data terlebih dahulu sebelum pertama kali menjalankan aplikasi, atau untuk pipeline CI/deployment yang ingin skema siap terlebih dahulu:
+Buat basis data persis seperti yang diharapkan ARGUS untuk dihubungkan.
+
+### Penjelasan — mengapa nama yang tepat penting
+
+Kode koneksi basis data ARGUS (`bot/database/db.py`) membaca nama basis data dari variabel environment `DB_NAME`, dan **jika `DB_NAME` tidak diset, defaultnya adalah persis `argus_db`** — diverifikasi langsung dari kode sumber:
+
+```python
+"database": os.getenv("DB_NAME", "argus_db"),
+```
+
+Ini adalah sumber kebenaran tunggal yang sebenarnya untuk nama basis data default. Jika Anda membuat basis data dengan nama berbeda (misalnya, `argus`, `Argus_DB`, `argusdb`) dan tidak menyetel `DB_NAME` agar cocok persis di file `.env` Anda, ARGUS akan mencoba terhubung ke `argus_db`, yang tidak akan ada, dan setiap operasi basis data tunggal akan gagal. **Nama basis data bersifat case-sensitive dalam praktiknya untuk tujuan ini** — buat persis `argus_db` kecuali Anda sengaja berencana menyetel `DB_NAME` khusus nanti.
+
+### Perintah
+
+Saat terhubung sebagai `postgres` (`psql -U postgres`):
+
+```sql
+CREATE DATABASE argus_db
+    WITH
+    OWNER = postgres
+    ENCODING = 'UTF8';
+```
+
+> Jika Anda sudah membuat role ARGUS khusus (lihat [§10](#10-pengguna-postgresql)), setel `OWNER` ke nama role tersebut sebagai gantinya.
+
+### Penjelasan setiap bagian
+
+- **`argus_db`** — nama persis yang diharapkan ARGUS secara default.
+- **`OWNER`** — role yang memiliki kendali penuh atas basis data ini. Ini seharusnya cocok dengan role yang akan digunakan ARGUS untuk terhubung (`DB_USER` di `.env` Anda).
+- **`ENCODING = 'UTF8'`** — deskripsi CVE dan catatan aset dapat berisi berbagai karakter Unicode (nama beraksen, teks non-Inggris, simbol khusus). Encoding default PostgreSQL pada beberapa sistem bergantung pada locale; secara eksplisit menentukan `UTF8` menghindari kegagalan insert terkait encoding nanti.
+
+### Verifikasi
+
+```sql
+\l
+```
+
+**Output yang diharapkan** (kutipan — daftar Anda mungkin menyertakan basis data lain juga):
+
+```
+                                  List of databases
+   Name    |  Owner   | Encoding |   Collate   |    Ctype    | Access privileges
+-----------+----------+----------+-------------+-------------+-------------------
+ argus_db  | postgres | UTF8     | en_US.UTF-8 | en_US.UTF-8 |
+ postgres  | postgres | UTF8     | en_US.UTF-8 | en_US.UTF-8 |
+ ...
+```
+
+Pastikan `argus_db` muncul dalam daftar dengan encoding `UTF8`.
+
+### Kesalahan umum
+
+| Kesalahan | Gejala (nanti) | Perbaikan |
+|---|---|---|
+| Membuat `argus` alih-alih `argus_db` | ARGUS gagal terhubung: `database "argus_db" does not exist` | Ganti nama basis data (`ALTER DATABASE argus RENAME TO argus_db;`) atau setel `DB_NAME=argus` di `.env` — tetapi yang pertama sangat direkomendasikan agar Anda tidak pernah perlu mengingat nilai non-default |
+| Membiarkan encoding sebagai default non-UTF8 | Insert deskripsi CVE dengan karakter khusus gagal nanti | Drop dan buat ulang basis data dengan `ENCODING = 'UTF8'` secara eksplisit (lakukan **sebelum** mengimpor skema/data apa pun) |
+| Membuat basis data saat terhubung ke **instance server** PostgreSQL yang berbeda (misalnya, versi lama masih berjalan berdampingan dengan versi baru) | `\l` dari satu sesi `psql` menunjukkan basis data, tetapi ARGUS masih tidak dapat menemukannya | Pastikan layanan/port PostgreSQL mana yang sebenarnya Anda hubungkan — lihat [§7](#7-layanan-postgresql) |
+
+### Pemulihan
+
+Untuk memulai ulang secara bersih:
+
+```sql
+DROP DATABASE IF EXISTS argus_db;
+CREATE DATABASE argus_db WITH OWNER = postgres ENCODING = 'UTF8';
+```
+
+**Lanjutkan ke [§10 Pengguna PostgreSQL](#10-pengguna-postgresql).**
+
+---
+
+## 10. Pengguna PostgreSQL
+
+### Tujuan
+
+Tentukan role PostgreSQL mana yang akan benar-benar digunakan ARGUS untuk terhubung, dan pahami trade-off-nya.
+
+### Penjelasan
+
+Kode koneksi basis data ARGUS men-default `DB_USER` ke `postgres` jika Anda tidak menyetelnya:
+
+```python
+"user": os.getenv("DB_USER", "postgres"),
+```
+
+Ini berarti **setup paling sederhana** — dan yang digunakan panduan ini secara default untuk pengembangan — adalah membiarkan ARGUS terhubung langsung sebagai superuser `postgres`. Ini baik-baik saja untuk mesin pengembangan pribadi tetapi **tidak direkomendasikan** untuk lingkungan bersama atau produksi apa pun, karena role `postgres` memiliki kekuatan tak terbatas atas seluruh server PostgreSQL, bukan hanya basis data ARGUS.
+
+### Setup pengembangan (jalur paling sederhana)
+
+Tidak perlu melakukan apa-apa lagi — selama `argus_db` dimiliki oleh `postgres` (seperti dibuat di [§9](#9-pembuatan-basis-data)) dan `.env` Anda tidak menyetel `DB_USER`/menyetelnya ke `postgres`, ARGUS akan terhubung dengan sukses menggunakan password `postgres` yang sudah Anda miliki.
+
+### Setup produksi / role-khusus (direkomendasikan untuk apa pun di luar pengujian solo lokal)
+
+Buat role khusus untuk ARGUS, dengan password yang hanya digunakan ARGUS:
+
+```sql
+CREATE ROLE argus_user WITH LOGIN PASSWORD 'pilih-password-kuat-di-sini';
+ALTER DATABASE argus_db OWNER TO argus_user;
+GRANT ALL PRIVILEGES ON DATABASE argus_db TO argus_user;
+```
+
+Kemudian di `.env` Anda (lihat [§13](#13-konfigurasi-environment)):
+
+```ini
+DB_USER=argus_user
+DB_PASSWORD=pilih-password-kuat-di-sini
+```
+
+### Kepemilikan dan hak akses, dijelaskan
+
+- **`ALTER DATABASE argus_db OWNER TO argus_user`** menjadikan `argus_user` sebagai pemilik basis data itu sendiri — dibutuhkan agar `argus_user` dapat membuat/mengubah tabel di dalamnya (yang persis apa yang dibutuhkan `schema.sql` dan `migrate.py`).
+- **`GRANT ALL PRIVILEGES`** adalah grant lebih luas yang mencakup hak connect/create pada basis data. Dikombinasikan dengan kepemilikan, ini memberi `argus_user` segala yang dibutuhkannya dan tidak lebih (ia masih tidak dapat, misalnya, membuat atau menghapus basis data *lain*, atau mengelola role PostgreSQL lain).
+
+### Pertimbangan keamanan
+
+- Jangan pernah menggunakan ulang password superuser `postgres` sebagai password aplikasi ARGUS Anda di lingkungan bersama apa pun.
+- Role `argus_user` khusus membatasi dampak jika file `.env` ARGUS (yang menyimpan password ini dalam teks polos — lihat [§13](#13-konfigurasi-environment)) pernah terekspos.
+
+### Kesalahan umum
+
+| Kesalahan | Gejala | Perbaikan |
+|---|---|---|
+| Membuat `argus_user` tetapi lupa mentransfer kepemilikan `argus_db` | `permission denied for database argus_db` atau `permission denied to create ... ` saat menerapkan `schema.sql` | Jalankan perintah `ALTER DATABASE ... OWNER TO ...` di atas |
+| Menyetel `DB_USER=argus_user` di `.env` tetapi tidak pernah benar-benar membuat role tersebut di PostgreSQL | `FATAL: role "argus_user" does not exist` | Jalankan perintah `CREATE ROLE` di atas terlebih dahulu |
+
+**Lanjutkan ke [§11 Inisialisasi Skema](#11-inisialisasi-skema).**
+
+---
+
+## 11. Inisialisasi Skema
+
+### Tujuan
+
+Ini adalah bagian tunggal terpenting di seluruh panduan ini. Menerapkan skema dengan benar, dalam urutan yang benar, adalah apa yang menentukan apakah ARGUS berfungsi sama sekali.
+
+### Penjelasan — apa yang sebenarnya dilakukan `schema.sql` dan `migrate.py`
+
+Berdasarkan inspeksi langsung kedua file:
+
+- **`bot/database/schema.sql`** adalah **satu-satunya** tempat di seluruh basis kode ARGUS yang berisi pernyataan `CREATE TABLE` untuk `assets`, `cves`, dan `matches` — tiga tabel fondasi yang menjadi dasar segala sesuatu yang lain. Ia juga membuat `alerts`, `reports`, `users`, dan empat view read-only (`ai_dashboard`, `ai_open_findings`, `ai_asset_summary`, `ai_vulnerability_summary`).
+- **`bot/database/migrate.py`** **tidak** membuat `assets`, `cves`, atau `matches`. Ia hanya menjalankan pernyataan `ALTER TABLE` terhadapnya (mengasumsikan sudah ada), dan secara terpisah membuat lima tabel terkait AI/risiko yang *tidak* ada di `schema.sql` sama sekali: `ai_conversations`, `ai_messages`, `cve_ai_analysis`, `risk_snapshots`, dan `ai_response_cache`. Ia juga menyegarkan keempat view dan membackfill baris analisis AI yang tertunda.
+- **`bot/dashboard/app.py`** menjalankan fungsi perbaikan internalnya sendiri (`_ensure_schema()`) secara otomatis setiap kali dashboard dimulai. Fungsi ini **juga** mengasumsikan `assets`, `cves`, dan `matches` sudah ada — setiap pernyataan di dalamnya adalah `ALTER TABLE ...` atau `CREATE TABLE IF NOT EXISTS` untuk tabel *lain*, tidak pernah `CREATE TABLE` untuk tiga tabel inti. Yang krusial, **fungsi ini menelan error secara diam-diam** — jika tabel inti tidak ada, `_ensure_schema()` gagal secara senyap di latar belakang, tidak mencatat apa pun yang terlihat bagi Anda, dan dashboard **tetap dimulai dan tampak berfungsi** hingga saat pertama sebuah halaman benar-benar meng-query `assets`/`cves`/`matches`, di titik mana ia crash dengan error seperti `relation "assets" does not exist`.
+
+**Ini persis mode kegagalan yang dijelaskan dalam pengujian dunia nyata** ("dashboard crashing due to missing tables", "relation 'assets' does not exist"). Ini terjadi secara khusus saat `schema.sql` dilewatkan dan dashboard dimulai langsung. Panduan ini mencegahnya dengan menjadikan `schema.sql` langkah wajib dan terverifikasi sebelum hal lain apa pun berjalan.
+
+### Urutan yang benar (dan mengapa)
+
+1. **Terapkan `schema.sql`** — membuat tiga tabel fondasi plus `alerts`/`reports`/`users`/view. Tidak ada hal lain yang berfungsi tanpa ini.
+2. **Jalankan `migrate.py`** — aman dijalankan berapa kali pun; membuat tabel AI/risiko dan menerapkan perbaikan kolom tambahan apa pun.
+3. **Baru kemudian** mulai `app.py` atau `bot/main.py`.
+
+Menjalankan `migrate.py` *sebelum* `schema.sql` juga dapat langsung didiagnosis: tidak seperti `_ensure_schema()` dashboard yang senyap, `migrate.py` **mencetak baris `FAILED` yang terlihat** dengan error basis data yang tepat untuk setiap langkah yang gagal — jadi jika Anda tidak sengaja menjalankannya lebih dulu, Anda akan melihat sesuatu seperti:
+
+```
+  → matches UNIQUE (asset_id, cve_id) constraint ... FAILED
+    relation "matches" does not exist
+```
+
+Ini diharapkan dan dapat dipulihkan — cukup jalankan `schema.sql` terlebih dahulu, lalu jalankan ulang `migrate.py` (sepenuhnya idempoten).
+
+### Perintah — Langkah 1: terapkan `schema.sql`
+
+Dari root proyek ARGUS:
+
+```bash
+psql -U postgres -d argus_db -f bot/database/schema.sql
+```
+
+(Ganti `-U postgres` dengan `-U argus_user` jika Anda membuat role khusus di [§10](#10-pengguna-postgresql).)
+
+**Output yang diharapkan** (kutipan — banyak baris `CREATE TABLE`/`CREATE INDEX`/`DO`):
+
+```
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+DO
+DO
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+DO
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+CREATE VIEW
+CREATE VIEW
+CREATE VIEW
+CREATE VIEW
+```
+
+Setiap baris seharusnya bertuliskan `CREATE TABLE`, `CREATE INDEX`, `CREATE VIEW`, atau `DO` — **tidak pernah** `ERROR`. Jika Anda melihat baris `ERROR` mana pun, berhenti dan baca [§17 Pemecahan Masalah](#17-pemecahan-masalah) sebelum melanjutkan.
+
+### Perintah — Langkah 2: jalankan `migrate.py`
+
+Header file `migrate.py` sendiri menyatakan invokasi yang persis dibutuhkan:
 
 ```bash
 cd bot
-python migrate.py
+python database/migrate.py
 ```
 
-Setiap langkah migrasi mencetak `OK` atau `FAILED` beserta error yang mendasarinya, dan skrip melanjutkan ke langkah-langkah berikutnya bahkan jika satu langkah gagal, sehingga satu pernyataan yang bermasalah tidak menggagalkan keseluruhan proses.
+**Output yang diharapkan** (kutipan):
 
-- `bot/database/schema.sql` juga disertakan sebagai referensi skema dasar (`psql -U argus_user -d argus_db -f bot/database/schema.sql`), berguna untuk meninjau tata letak tabel lengkap secara offline, tetapi **tidak diperlukan** sebagai langkah instalasi mengingat perilaku self-healing di atas.
+```
+Argus database migration
+
+  → assets.type column ... OK
+  → assets.last_scan column ... OK
+  → assets.search_keyword column ... OK
+  → cves.severity column ... OK
+  → cves.epss column ... OK
+  → cves.epss_percentile column ... OK
+  → cves.created_at column ... OK
+  ...
+Migration complete.
+
+Argus AI views
+
+  → view ai_dashboard ... OK
+  → view ai_open_findings ... OK
+  → view ai_asset_summary ... OK
+  → view ai_vulnerability_summary ... OK
+
+Backfilling AI analysis queue
+
+  → queued 0 CVE(s) that had no analysis row yet
+```
+
+Setiap langkah migrasi seharusnya bertuliskan **`OK`**. Jika ada langkah bertuliskan **`FAILED`**, pesan error yang dicetak segera setelahnya memberi tahu Anda persis apa yang salah (paling umum: `schema.sql` tidak diterapkan terlebih dahulu).
 
 ### Verifikasi
 
 ```bash
-psql -U argus_user -d argus_db -c "\dt"
+psql -U postgres -d argus_db -c "\dt"
 ```
 
-Setelah pertama kali menjalankan `app.py` atau `bot/migrate.py`, Anda seharusnya melihat setidaknya: `assets`, `cves`, `matches`, `alerts`, `reports`, `users`, `ai_conversations`, `ai_messages`, `cve_ai_analysis`, `risk_snapshots`, dan `ai_response_cache`.
+Lihat [§12 Verifikasi Basis Data](#12-verifikasi-basis-data) untuk daftar tabel lengkap yang diharapkan.
 
-### Pemeriksaan integritas
+### Kesalahan umum
+
+| Kesalahan | Gejala | Perbaikan |
+|---|---|---|
+| Menjalankan `migrate.py` sebelum `schema.sql` | Setiap langkah dalam output `migrate.py` bertuliskan `FAILED` dengan `relation "..." does not exist` | Jalankan `schema.sql` terlebih dahulu (Langkah 1 di atas), lalu jalankan ulang `migrate.py` — aman dijalankan ulang |
+| Menjalankan `psql` terhadap basis data yang salah (misalnya, basis data `postgres` default, lupa `-d argus_db`) | `schema.sql` tampak berhasil, tetapi tabel tidak ada di `argus_db` | Selalu periksa ulang flag `-d argus_db`; verifikasi dengan `\dt` segera setelahnya saat terhubung khusus ke `argus_db` |
+| Menjalankan `python database/migrate.py` dari direktori yang salah | `ModuleNotFoundError: No module named 'database'` | Anda harus menjalankannya sebagai `cd bot && python database/migrate.py` — import relatif skrip (`from database.db import get_connection`) membutuhkan `bot/` sebagai direktori saat ini Anda |
+| Mengasumsikan memulai dashboard sekali akan membuat tabel untuk Anda | Dashboard dimulai tanpa error terlihat, lalu crash di halaman nyata pertama dengan `relation "assets" does not exist` | Ini persis mode kegagalan senyap yang dijelaskan di atas — kembali dan jalankan `schema.sql` secara manual; memulai `app.py` tidak pernah menjadi pengganti untuk itu |
+
+### Rollback
+
+Baik `schema.sql` maupun `migrate.py` tidak mendukung "undo" otomatis. Setiap pernyataan dalam kedua file bersifat aditif (`CREATE TABLE IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`) — tidak ada down-migration yang sesuai. Untuk benar-benar memulai ulang:
 
 ```sql
-SELECT COUNT(*) FROM assets;
-SELECT COUNT(*) FROM cves;
-SELECT COUNT(*) FROM matches;
+DROP DATABASE argus_db;
+CREATE DATABASE argus_db WITH OWNER = postgres ENCODING = 'UTF8';
 ```
 
-Pada instalasi baru, semuanya seharusnya mengembalikan `0` tanpa error — error di sini menandakan skema tidak diterapkan dengan benar; jalankan ulang `python migrate.py` dan periksa outputnya.
+Kemudian ulangi Langkah 1 dan 2 di atas dari awal.
 
-### Rollback dan pemulihan
+### Praktik terbaik
 
-ARGUS tidak menyertakan alat down-migration/rollback — migrasi bersifat aditif (`ADD COLUMN IF NOT EXISTS`, `CREATE TABLE IF NOT EXISTS`) dan tidak dirancang untuk dibalik secara otomatis. Jika sebuah migrasi perlu dibatalkan, pulihkan dari backup yang diambil sebelum migrasi tersebut berjalan (lihat [§17 Backup & Restore](#17-backup--restore)) alih-alih mencoba membalikkan pernyataan `ALTER TABLE` secara manual satu per satu.
+- Selalu terapkan `schema.sql` segera setelah membuat basis data, sebelum menyentuh hal lain apa pun.
+- Selalu jalankan `migrate.py` sekali setelah `schema.sql`, bahkan pada basis data yang sepenuhnya baru — ia membuat tabel AI/risiko yang tidak dibuat `schema.sql`.
+- Jalankan ulang `migrate.py` setelah setiap pembaruan ARGUS (lihat [§20](#20-memperbarui-argus)) — selalu aman dijalankan ulang dan mengambil kolom/tabel baru apa pun yang ditambahkan oleh versi ARGUS yang lebih baru.
+
+**Lanjutkan ke [§12 Verifikasi Basis Data](#12-verifikasi-basis-data).**
 
 ---
 
-## 7. Konfigurasi Environment
+## 12. Verifikasi Basis Data
 
-Seluruh konfigurasi dilakukan melalui variabel environment di file `.env` pada root proyek, dimuat secara otomatis oleh `app.py` maupun `bot/main.py`.
+### Tujuan
 
-| Variabel | Wajib? | Default | Tujuan |
-|---|---|---|---|
-| `SECRET_KEY` | **Wajib** (dashboard) | Tidak ada — aplikasi memicu `RuntimeError` dan menolak untuk berjalan jika tidak diset | Kunci penandatanganan sesi Flask. Buat dengan `python -c "import secrets; print(secrets.token_hex(32))"` |
-| `ADMIN_PASSWORD` | **Wajib** (dashboard) | Tidak ada — aplikasi menolak untuk berjalan jika tidak diset | Password untuk akun bawaan `admin` |
-| `VIEWER_PASSWORD` | **Wajib** (dashboard) | Tidak ada — aplikasi menolak untuk berjalan jika tidak diset | Password untuk akun bawaan `viewer` (hanya-baca) |
-| `DB_HOST` | Opsional | `localhost` | Host PostgreSQL |
-| `DB_NAME` | Opsional | `argus_db` | Nama basis data PostgreSQL |
-| `DB_USER` | Opsional | `postgres` | User PostgreSQL |
-| `DB_PASSWORD` | **Wajib** | Tidak ada — koneksi akan gagal tanpanya | Password PostgreSQL |
-| `DB_PORT` | Opsional | `5432` | Port PostgreSQL |
-| `DB_POOL_MIN_CONN` | Opsional | `2` | Jumlah minimum koneksi yang dijaga tetap terbuka dalam connection pool internal ARGUS |
-| `DB_POOL_MAX_CONN` | Opsional | `20` | Jumlah maksimum koneksi dalam pool |
-| `NVD_API_KEY` | Opsional tetapi direkomendasikan | Tidak ada (tanpa autentikasi, rate limit rendah) | Menaikkan rate limit NVD API Anda secara substansial; lihat [§9](#9-konfigurasi-api-eksternal) |
-| `TOKEN` | Wajib hanya jika menjalankan bot Telegram | Tidak ada — bot memicu `RuntimeError` dan menolak untuk berjalan jika tidak diset | Token Telegram Bot API, dari BotFather |
-| `CHAT_ID` | Wajib hanya untuk pengiriman alert Telegram | Tidak ada — alert dilewati secara diam-diam jika tidak diset | ID chat/channel Telegram tujuan tempat alert pemindaian dikirim |
-| `LLM_URL` | Opsional | Tidak ada — endpoint chat AI mengembalikan error "belum dikonfigurasi" yang jelas jika tidak diset | URL lengkap endpoint `/v1/chat/completions` yang kompatibel dengan OpenAI (misalnya server `llama.cpp` lokal) |
-| `RUN_SCHEDULER` | Opsional | `true` | Setel ke `false` pada satu proses jika Anda menjalankan `app.py` dan `bot/main.py` di bawah supervisor yang sama dan ingin menghindari penjadwalan ganda job latar belakang (lihat [§12](#12-konfigurasi-scheduler)) |
-| `SESSION_COOKIE_SECURE` | Opsional | `true` | Setel ke `false` **hanya** untuk pengujian HTTP lokal/LAN; biarkan `true` pada deployment apa pun yang dilayani melalui HTTPS |
+Pastikan setiap tabel yang dibutuhkan ARGUS benar-benar ada sebelum mencoba menjalankan bagian aplikasi apa pun.
 
-**Pertimbangan keamanan:**
+### Perintah
 
-- `.env` berisi rahasia (secret) dalam bentuk plaintext (password basis data, password admin/viewer, token bot). File ini sudah dikecualikan dari version control melalui `.gitignore`; pastikan proses deployment Anda (backup, log CI, image container) juga tidak secara tidak sengaja menyertakannya.
-- Secara sengaja **tidak ada default yang tidak aman** untuk `SECRET_KEY`, `ADMIN_PASSWORD`, atau `VIEWER_PASSWORD` — aplikasi tidak akan berjalan tanpanya, secara by design.
-- `DB_PASSWORD` tidak memiliki default hardcoded; membiarkannya tidak diset akan menghasilkan peringatan startup dan kegagalan koneksi, bukan koneksi tidak aman secara diam-diam.
+```bash
+psql -U postgres -d argus_db -c "\dt"
+```
 
-**Contoh `.env`:**
+### Output yang diharapkan
+
+```
+                 List of relations
+ Schema |         Name            | Type  |  Owner
+--------+--------------------------+-------+----------
+ public | ai_conversations         | table | postgres
+ public | ai_messages              | table | postgres
+ public | ai_response_cache        | table | postgres
+ public | alerts                   | table | postgres
+ public | assets                   | table | postgres
+ public | cve_ai_analysis          | table | postgres
+ public | cves                     | table | postgres
+ public | matches                  | table | postgres
+ public | reports                  | table | postgres
+ public | risk_snapshots           | table | postgres
+ public | users                    | table | postgres
+```
+
+Anda seharusnya melihat **seluruh sebelas tabel** yang tercantum di atas. (`Owner` akan bertuliskan `argus_user` alih-alih `postgres` jika Anda mengikuti setup role-khusus di [§10](#10-pengguna-postgresql).)
+
+### Verifikasi keempat view secara terpisah
+
+```bash
+psql -U postgres -d argus_db -c "\dv"
+```
+
+**Output yang diharapkan:**
+
+```
+                  List of relations
+ Schema |          Name             | Type |  Owner
+--------+----------------------------+------+----------
+ public | ai_asset_summary           | view | postgres
+ public | ai_dashboard               | view | postgres
+ public | ai_open_findings           | view | postgres
+ public | ai_vulnerability_summary   | view | postgres
+```
+
+### Fungsi setiap tabel (singkat)
+
+| Tabel | Tujuan |
+|---|---|
+| `assets` | Inventaris terlacak Anda (perangkat, perangkat lunak, sistem) |
+| `cves` | Catatan kerentanan yang di-cache, diambil dari NVD |
+| `matches` | Keterkaitan antara aset dan CVE yang memengaruhinya, plus skor risiko dan status remediasi |
+| `alerts` | Catatan setiap alert Telegram yang telah dikirim ARGUS |
+| `reports` | Metadata tentang laporan PDF yang dihasilkan |
+| `users` | Akun dashboard yang mendaftar sendiri (terpisah dari akun `admin`/`viewer` bawaan — lihat [§13](#13-konfigurasi-environment)) |
+| `ai_conversations` / `ai_messages` | Riwayat chat AI Security Copilot |
+| `cve_ai_analysis` | Analisis yang dihasilkan AI tersimpan untuk CVE individual |
+| `risk_snapshots` | Satu baris per hari statistik risiko agregat, untuk grafik tren |
+| `ai_response_cache` | Cache berumur-pendek dari jawaban chat AI |
+
+### Verifikasi — pastikan tabel benar-benar dapat digunakan, bukan hanya ada
+
+```bash
+psql -U postgres -d argus_db -c "SELECT COUNT(*) FROM assets;"
+```
+
+**Output yang diharapkan** pada instalasi baru:
+
+```
+ count
+-------
+     0
+(1 row)
+```
+
+`0` benar dan diharapkan di sini — ini mengonfirmasi tabel ada dan dapat di-query, meskipun kosong. Error alih-alih `0` berarti ada yang masih salah.
+
+### Kesalahan umum
+
+| Kesalahan | Gejala | Perbaikan |
+|---|---|---|
+| Hanya sebagian tabel muncul (misalnya, `assets`/`cves`/`matches`/`alerts`/`reports`/`users` ada, tetapi tidak ada `ai_conversations`/`risk_snapshots`/dll.) | Anda menerapkan `schema.sql` tetapi tidak pernah menjalankan `migrate.py` | Kembali ke [§11 Langkah 2](#11-inisialisasi-skema) dan jalankan `migrate.py` |
+| Tidak ada tabel sama sekali yang muncul | `schema.sql` tidak pernah diterapkan, atau diterapkan ke basis data yang salah | Kembali ke [§11 Langkah 1](#11-inisialisasi-skema) |
+| `\dt` menunjukkan tabel, tetapi dimiliki oleh user yang tidak terduga | Anda menerapkan `schema.sql` saat terhubung sebagai role berbeda dari yang dimaksudkan | Belum tentu masalah tersendiri, tetapi pastikan `DB_USER` di `.env` Anda cocok dengan role yang memiliki hak akses pada tabel-tabel ini |
+
+**Lanjutkan ke [§13 Konfigurasi Environment](#13-konfigurasi-environment).**
+
+---
+
+## 13. Konfigurasi Environment
+
+### Tujuan
+
+Konfigurasi setiap pengaturan yang benar-benar dibaca ARGUS dari environment-nya, dalam satu file `.env`.
+
+### Penjelasan
+
+ARGUS membaca konfigurasi dari file bernama `.env`, ditempatkan di **root proyek ARGUS** (folder yang sama yang berisi `requirements.txt` dan folder `bot/`). Ini dimuat secara otomatis oleh library `python-dotenv` milik Python, yang dipanggil oleh setiap bagian ARGUS yang membutuhkan konfigurasi (`bot/database/db.py`, `bot/alerts/telegram_alert.py`, `bot/main.py`) saat startup.
+
+**Detail penting yang terverifikasi:** fungsi `load_dotenv()` milik `python-dotenv` — yang dipanggil ARGUS, tanpa argumen — mencari `.env` dimulai dari **direktori kerja saat ini** Anda dan berjalan **ke atas** melalui folder induk hingga menemukannya. Ini berarti `.env` di root proyek akan ditemukan dengan benar baik Anda menjalankan ARGUS dari root proyek, dari `bot/`, atau dari `bot/dashboard/` — **selama direktori saat ini terminal Anda berada di suatu tempat di dalam folder proyek ARGUS.** Jika Anda `cd` sepenuhnya keluar dari proyek (misalnya, ke folder temp sistem) dan memanggil skrip dengan path absolut, `.env` tidak akan ditemukan, karena pencarian ke-atas tidak pernah mencapai folder proyek. Selalu jalankan perintah ARGUS dengan direktori saat ini terminal Anda berada di suatu tempat di dalam proyek.
+
+### Setiap variabel environment yang benar-benar dibaca ARGUS
+
+Tabel di bawah ini dibuat dengan mencari seluruh basis kode untuk setiap pemanggilan `os.getenv(...)` dan `os.environ.get(...)`. **Tidak ada variabel yang tidak tercantum di sini yang dibaca di mana pun dalam ARGUS.** Jika Anda pernah melihat proyek manajemen kerentanan lain menggunakan nama seperti `DATABASE_URL`, `POSTGRES_HOST`, `TELEGRAM_TOKEN`, atau `OLLAMA_HOST` — ARGUS tidak menggunakan nama apa pun itu. Gunakan nama persis di bawah ini.
+
+#### Wajib
+
+| Variabel | Tujuan | Wajib? | Default | Catatan |
+|---|---|---|---|---|
+| `SECRET_KEY` | Kunci penandatanganan sesi Flask | **Ya — dashboard menolak untuk dimulai tanpanya** | Tidak ada | Buat dengan `python -c "import secrets; print(secrets.token_hex(32))"`. Jika tidak diset, `app.py` memicu `RuntimeError: SECRET_KEY is missing.` segera saat startup. |
+| `DB_PASSWORD` | Password koneksi PostgreSQL | Efektifnya ya | Tidak ada (string kosong) | Tidak ditegakkan oleh kegagalan startup yang keras, tetapi sebuah peringatan dicatat, dan setiap operasi basis data akan gagal tanpanya jika role Anda benar-benar memiliki password yang diset |
+| `TOKEN` | Token Telegram Bot API | Hanya jika menjalankan bot Telegram (`bot/main.py`) | Tidak ada | Jika tidak diset, `bot/main.py` memicu `RuntimeError: TOKEN environment variable is not set.` segera. Tidak dibutuhkan untuk menjalankan dashboard saja. |
+
+#### Koneksi basis data (semua opsional — default yang masuk akal ada)
+
+| Variabel | Default | Tujuan |
+|---|---|---|
+| `DB_HOST` | `localhost` | Hostname/IP server PostgreSQL |
+| `DB_NAME` | `argus_db` | Nama basis data — harus cocok persis dengan yang Anda buat di [§9](#9-pembuatan-basis-data) |
+| `DB_USER` | `postgres` | Role PostgreSQL yang digunakan ARGUS untuk terhubung |
+| `DB_PORT` | `5432` | Port PostgreSQL |
+| `DB_POOL_MIN_CONN` | `2` | Jumlah minimum koneksi basis data ter-pool yang tetap terbuka |
+| `DB_POOL_MAX_CONN` | `20` | Jumlah maksimum koneksi basis data ter-pool |
+
+#### Akun dashboard
+
+| Variabel | Default | Catatan |
+|---|---|---|
+| `ADMIN_PASSWORD` | **`"admin"` jika tidak diset** | Ini adalah fallback nyata dan terverifikasi dalam kode sumber — `os.getenv("ADMIN_PASSWORD", "admin")`. **Anda harus menyetel ini secara eksplisit ke password yang kuat**; membiarkannya tidak diset berarti password akun admin bawaan adalah kata literal `admin`. |
+| `VIEWER_PASSWORD` | Tidak ada (tanpa fallback) | Password akun `viewer` (hanya-baca) bawaan. Jika tidak diset, akun ini sama sekali tidak dapat login (passwordnya dibandingkan dengan `None`, yang tidak pernah cocok dengan apa pun yang diketik). |
+
+#### Sumber data eksternal
+
+| Variabel | Default | Catatan |
+|---|---|---|
+| `NVD_API_KEY` | Tidak ada | Opsional. Tanpanya, lookup kerentanan NVD dibatasi rate-nya lebih agresif. Dapatkan kunci gratis dari [halaman permintaan kunci API NVD](https://nvd.nist.gov/developers/request-an-api-key). |
+
+#### Alert Telegram
+
+| Variabel | Default | Catatan |
+|---|---|---|
+| `CHAT_ID` | Tidak ada | ID chat/channel Telegram tempat alert dikirim. Dibutuhkan hanya untuk pengiriman alert (`send_alert`/`send_document` keduanya memicu error jika ini atau `TOKEN` hilang) — tidak dibutuhkan untuk menjalankan dashboard atau perintah bot yang tidak mengirim alert. |
+
+#### AI (semua opsional — ARGUS berjalan sepenuhnya tanpa satu pun ini diset)
+
+| Variabel | Default | Catatan |
+|---|---|---|
+| `LLM_URL` | `http://192.168.0.26:8080/v1/chat/completions` | URL lengkap endpoint chat completions yang kompatibel dengan OpenAI (server `llama.cpp` lokal atau Ollama). **Default ini adalah alamat IP LAN spesifik, bukan placeholder** — jika Anda tidak menyetel `LLM_URL` Anda sendiri, ARGUS akan benar-benar mencoba terhubung ke alamat persis tersebut dan, saat koneksi gagal, chat AI akan membalas "ARGUS AI server is offline. Please start the LLM server." |
+| `LLM_MODEL_NAME` | `default-local-llm` | Label kosmetik yang disimpan bersama analisis CVE yang dihasilkan AI, mencatat model mana yang menghasilkannya. Tidak memengaruhi konektivitas atau perilaku. |
+
+#### Scheduler
+
+| Variabel | Default | Catatan |
+|---|---|---|
+| `RUN_SCHEDULER` | `true` | Mengontrol apakah penjadwal job latar belakang (pemindaian harian, laporan, batch analisis AI) dimulai di dalam proses ini. Nilai "off" yang diterima adalah `false`, `0`, atau `no` (tidak case-sensitive). Lihat [§15](#15-menjalankan-argus) untuk alasan ini penting jika Anda menjalankan dashboard dan bot sekaligus. |
+
+### Contoh file `.env` lengkap
 
 ```ini
-# Inti
-SECRET_KEY=replace-with-a-long-random-value
-ADMIN_PASSWORD=replace-with-a-strong-password
-VIEWER_PASSWORD=replace-with-a-different-strong-password
+# ── Wajib ──────────────────────────────────────────────
+SECRET_KEY=ganti-dengan-nilai-acak-panjang
+DB_PASSWORD=ganti-dengan-password-postgresql-anda
 
-# Basis Data
+# ── Koneksi basis data ────────────────────────────────
 DB_HOST=localhost
 DB_NAME=argus_db
-DB_USER=argus_user
-DB_PASSWORD=replace-with-your-db-password
+DB_USER=postgres
 DB_PORT=5432
+DB_POOL_MIN_CONN=2
+DB_POOL_MAX_CONN=20
 
-# NVD
-NVD_API_KEY=replace-with-your-nvd-api-key
+# ── Akun dashboard ────────────────────────────────────
+ADMIN_PASSWORD=ganti-dengan-password-admin-yang-kuat
+VIEWER_PASSWORD=ganti-dengan-password-viewer-yang-kuat
 
-# Telegram (opsional)
-TOKEN=replace-with-your-telegram-bot-token
-CHAT_ID=replace-with-your-telegram-chat-id
+# ── NVD (opsional tapi direkomendasikan) ─────────────
+NVD_API_KEY=
 
-# AI (opsional)
-LLM_URL=http://127.0.0.1:8080/v1/chat/completions
+# ── Telegram (opsional) ───────────────────────────────
+TOKEN=
+CHAT_ID=
 
-# Deployment
-SESSION_COOKIE_SECURE=true
+# ── AI (opsional) ─────────────────────────────────────
+LLM_URL=
+LLM_MODEL_NAME=
+
+# ── Scheduler ─────────────────────────────────────────
 RUN_SCHEDULER=true
 ```
 
-> **Variabel yang tidak digunakan oleh basis kode ini.** Jika Anda pernah melihat proyek manajemen kerentanan lain menggunakan variabel seperti `DATABASE_URL`, `POSTGRES_*`, `OPENCVE_URL`, `TELEGRAM_TOKEN`, `OLLAMA_HOST`, `MODEL_NAME`, `SESSION_TIMEOUT`, `LOG_LEVEL`, atau `REPORT_DIRECTORY`, perhatikan bahwa **ARGUS tidak membaca satu pun dari variabel-variabel ini**. Gunakan nama variabel persis seperti pada tabel di atas — `DB_*` (bukan `POSTGRES_*`), `TOKEN` (bukan `TELEGRAM_TOKEN`), dan `LLM_URL` (bukan `OLLAMA_HOST`/`MODEL_NAME`). Masa berlaku sesi (8 jam) dan tingkat verbositas log saat ini bersifat tetap (fixed) dalam kode alih-alih dapat dikonfigurasi lewat environment, dan direktori output laporan bersifat tetap relatif terhadap aplikasi (`bot/dashboard/generated_reports/`), bukan dapat dikonfigurasi lewat environment.
+Biarkan variabel opsional apa pun kosong (atau hilangkan sepenuhnya) jika Anda tidak membutuhkan fitur tersebut — jangan masukkan teks placeholder seperti `your-token-here` ke nilai yang benar-benar akan dicoba digunakan ARGUS, karena itu akan diperlakukan sebagai nilai nyata yang salah alih-alih "tidak dikonfigurasi".
+
+### Pertimbangan keamanan
+
+- `.env` berisi rahasia teks polos (password basis data, password admin, token Telegram). Jangan pernah meng-commit-nya ke version control. `.gitignore` ARGUS sendiri sudah mengecualikannya — jangan hapus pengecualian itu.
+- Ubah `ADMIN_PASSWORD` segera — fallback `"admin"` nyata dan dapat dieksploitasi jika dibiarkan pada deployment yang dapat dijangkau jaringan apa pun.
+- Batasi izin filesystem pada `.env` (`chmod 600 .env` di Linux) sehingga hanya akun yang menjalankan ARGUS yang dapat membacanya.
+
+### Kesalahan umum
+
+| Kesalahan | Gejala | Perbaikan |
+|---|---|---|
+| Mengetik nama variabel yang tidak digunakan ARGUS (misalnya, `DATABASE_URL`, `POSTGRES_PASSWORD`) | ARGUS secara diam-diam mengabaikannya dan kembali ke default, menyebabkan error "basis data salah"/"password salah" yang membingungkan | Gunakan nama variabel persis di tabel di atas — periksa typo karakter demi karakter |
+| Membiarkan `ADMIN_PASSWORD` tidak diset, mengasumsikan itu akan memaksa prompt setup | Akun admin secara diam-diam menerima password `admin` | Setel secara eksplisit |
+| Menyetel `DB_NAME` ke sesuatu selain yang benar-benar Anda buat di PostgreSQL | `FATAL: database "..." does not exist` | Buat `DB_NAME` dan nama basis data sebenarnya cocok persis, atau ganti nama basis data agar cocok |
+| Memasukkan nilai placeholder palsu ke `LLM_URL` "untuk berjaga-jaga" | ARGUS benar-benar mencoba terhubung ke alamat palsu tersebut dan gagal, alih-alih berperilaku seolah-olah AI hanya tidak digunakan | Biarkan `LLM_URL` kosong/tidak diset jika Anda belum menginginkan fitur AI |
+
+**Lanjutkan ke [§14 Verifikasi Environment](#14-verifikasi-environment).**
 
 ---
 
-## 8. Instalasi AI
+## 14. Verifikasi Environment
 
-AI Security Copilot (chat dan analisis CVE otomatis) bersifat **opsional** — ARGUS berjalan sepenuhnya normal tanpa variabel ini diset; endpoint `/api/chat` cukup mengembalikan error "belum dikonfigurasi" yang eksplisit, dan job analisis CVE latar belakang tidak memiliki apa pun untuk dikerjakan.
+### Tujuan
 
-Klien AI milik ARGUS (`bot/Ai/llm.py`) menggunakan skema `/v1/chat/completions` yang kompatibel dengan OpenAI melalui HTTP biasa dan tidak menyematkan SDK vendor tertentu. Klien ini telah dievaluasi terhadap server `llama.cpp` lokal. Berikut adalah jalur instalasi untuk dua opsi lokal yang umum; salah satu (atau server lain mana pun yang mengimplementasikan bentuk API yang sama) berfungsi sebagai pengganti langsung target `LLM_URL`.
+Pastikan setiap nilai dalam file `.env` Anda benar-benar tepat **sebelum** menjalankan ARGUS itu sendiri, sehingga masalah yang tersisa apa pun mudah diisolasi.
 
-### Opsi A: server llama.cpp (konfigurasi yang telah dievaluasi)
+### Verifikasi koneksi basis data secara independen dari ARGUS
 
-**Linux:**
+```bash
+psql -U <nilai DB_USER> -d <nilai DB_NAME> -h <nilai DB_HOST> -p <nilai DB_PORT>
+```
+
+Untuk nilai default, ini persis:
+
+```bash
+psql -U postgres -d argus_db -h localhost -p 5432
+```
+
+**Output yang diharapkan:** prompt `argus_db=#` yang sama seperti sebelumnya. Jika ini gagal, perbaiki di sini sebelum menyentuh ARGUS — setiap mode kegagalan dan perbaikannya sudah dicakup di [§8](#8-menghubungkan-ke-postgresql) dan [§9](#9-pembuatan-basis-data).
+
+### Verifikasi kredensial cocok persis
+
+Buka `.env` dan baca ulang nilai `DB_PASSWORD` karakter demi karakter terhadap password apa pun yang benar-benar Anda setel untuk role PostgreSQL tersebut. Error copy-paste di sini (spasi trailing, karakter kutip yang salah) adalah penyebab umum yang mudah terlewat dari `password authentication failed`.
+
+### Verifikasi endpoint AI (hanya jika Anda berniat menggunakan fitur AI)
+
+```bash
+curl -X POST "<nilai LLM_URL Anda>" \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Say OK if you can read this."}]}'
+```
+
+**Output yang diharapkan:** respons JSON berisi `"choices"` dan konten pesan. Jika ini gagal (connection refused/timeout), fitur chat AI akan menampilkan "ARGUS AI server is offline" setelah ARGUS berjalan — itu perilaku yang diharapkan dan benar mengingat endpoint yang tidak dapat dijangkau, bukan bug.
+
+### Verifikasi token Telegram (hanya jika menggunakan bot)
+
+```bash
+curl "https://api.telegram.org/bot<nilai TOKEN Anda>/getMe"
+```
+
+**Output yang diharapkan:**
+
+```json
+{"ok":true,"result":{"id":123456789,"is_bot":true,"first_name":"NamaBotAnda", ...}}
+```
+
+Jika Anda melihat `{"ok":false,"error_code":401,"description":"Unauthorized"}`, tokennya salah — buat ulang via **@BotFather** di Telegram.
+
+### Verifikasi pengaturan scheduler
+
+Cukup baca ulang baris `RUN_SCHEDULER` di `.env`. Jika Anda berencana menjalankan **baik** dashboard maupun bot Telegram secara bersamaan, baca [§15](#15-menjalankan-argus) sekarang sebelum memulai salah satunya, untuk menghindari job terjadwal yang terduplikasi.
+
+### Verifikasi kesiapan dashboard (pemeriksaan kering sebelum benar-benar menjalankannya)
+
+Pastikan `SECRET_KEY` benar-benar ada dan tidak kosong:
+
+```bash
+grep -q "^SECRET_KEY=." .env && echo "SECRET_KEY is set" || echo "SECRET_KEY is MISSING or empty"
+```
+
+**Lanjutkan ke [§15 Menjalankan ARGUS](#15-menjalankan-argus).**
+
+---
+
+## 15. Menjalankan ARGUS
+
+### Tujuan
+
+Mulai setiap komponen ARGUS dalam urutan yang benar, dan pahami persis mengapa urutan tersebut penting.
+
+### 15.1 Urutan startup yang benar
+
+```mermaid
+flowchart TD
+    A[Server PostgreSQL berjalan] --> B["Dashboard (bot/dashboard/app.py)\ndan/atau bot Telegram (bot/main.py)"]
+    B --> C["Scheduler\n(dimulai otomatis oleh proses mana pun\nyang dimulai lebih dulu, sesuai RUN_SCHEDULER)"]
+    C --> D["AI\n(digunakan sesuai permintaan oleh chat dan oleh\njob analisis AI milik scheduler — tidak ada\nyang perlu dimulai terpisah)"]
+    C --> E["Scanner\n(dipanggil sesuai permintaan melalui dashboard/bot,\ndan otomatis oleh job pemindaian harian)"]
+```
+
+**Mengapa urutan ini:** PostgreSQL harus dapat dijangkau sebelum dashboard maupun bot dimulai, karena keduanya segera mencoba operasi basis data saat startup. Baik scheduler, client AI, maupun scanner bukan proses terpisah yang Anda mulai sendiri — mereka dipanggil secara otomatis, dari dalam `app.py`/`main.py` mana pun yang Anda jalankan.
+
+### 15.2 Jalankan dashboard
+
+```bash
+cd bot/dashboard
+python app.py
+```
+
+**Output yang diharapkan:**
+
+```
+ * Serving Flask app 'app'
+ * Debug mode: off
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://<ip-lokal-anda>:5000
+```
+
+Buka `http://localhost:5000` di browser.
+
+**Jika `SECRET_KEY` hilang, Anda malah akan melihat:**
+
+```
+RuntimeError: SECRET_KEY is missing. Add a long random SECRET_KEY to the .env file.
+```
+
+Ini perilaku yang diharapkan dan benar — kembali ke [§13](#13-konfigurasi-environment).
+
+### 15.3 Jalankan bot Telegram (opsional, proses terpisah)
+
+```bash
+cd bot
+python main.py
+```
+
+**Output yang diharapkan:**
+
+```
+2026-07-09 12:00:00 [INFO] telegram.ext.Application: Application started
+```
+
+**Jika `TOKEN` hilang:**
+
+```
+RuntimeError: TOKEN environment variable is not set.
+```
+
+Kembali ke [§13](#13-konfigurasi-environment).
+
+### 15.4 Server AI opsional
+
+ARGUS tidak menyertakan atau menginstal server LLM itu sendiri — ini sepenuhnya tanggung jawab Anda sendiri, dan sepenuhnya opsional. Server apa pun yang mengimplementasikan endpoint `/v1/chat/completions` yang kompatibel dengan OpenAI berfungsi, karena itulah satu-satunya interface yang digunakan client AI ARGUS (`bot/Ai/llm.py`).
+
+**Opsi A — server llama.cpp:**
+
 ```bash
 git clone https://github.com/ggerganov/llama.cpp
 cd llama.cpp
-cmake -B build
-cmake --build build --config Release -j
+cmake -B build && cmake --build build --config Release -j
+./build/bin/llama-server -m /path/to/your-model.gguf --host 0.0.0.0 --port 8080
 ```
 
-Unduh model berformat GGUF (lihat rekomendasi model di bawah), lalu jalankan server:
+**Opsi B — Ollama:**
 
-```bash
-./build/bin/llama-server -m /path/to/model.gguf --host 0.0.0.0 --port 8080
-```
-
-**Windows:** unduh rilis prebuilt dari halaman rilis GitHub llama.cpp, atau build dengan tooling CMake Visual Studio mengikuti langkah `cmake -B build` / `cmake --build build` yang sama dalam Developer Command Prompt.
-
-### Opsi B: Ollama (endpoint kompatibel OpenAI)
-
-Ollama tidak diintegrasikan melalui jalur kode khusus Ollama mana pun di ARGUS, tetapi permukaan API-nya yang kompatibel dengan OpenAI sesuai dengan kontrak `LLM_URL` yang sama.
-
-**Linux:**
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh
 ollama pull llama3.1:8b
 ollama serve
 ```
 
-**Windows:** unduh installer dari [ollama.com/download](https://ollama.com/download), lalu dari terminal:
-```powershell
-ollama pull llama3.1:8b
-```
-Endpoint kompatibel OpenAI milik Ollama diekspos di `http://localhost:11434/v1/chat/completions` secara default — arahkan `LLM_URL` ke alamat tersebut ditambah nama model Anda di tempat server membutuhkannya.
+Endpoint kompatibel OpenAI milik Ollama adalah `http://localhost:11434/v1/chat/completions` secara default — setel `LLM_URL` di `.env` ke alamat tersebut (atau ke alamat server `llama.cpp` Anda) alih-alih membiarkan default IP-LAN bawaan tetap ada.
 
-### Rekomendasi model
+### 15.5 Menjalankan dashboard dan bot bersamaan
 
-| Kasus penggunaan | Kelas model yang disarankan | Perkiraan memori (kuantisasi Q4) |
+Baik `app.py` maupun `bot/main.py` mampu memulai scheduler. Jika Anda menjalankan kedua proses sekaligus **tanpa** mengatasi ini, setiap job terjadwal (pemindaian harian, laporan mingguan/bulanan, batch analisis AI) akan berjalan **dua kali** — sekali per proses. Setel `RUN_SCHEDULER=false` di `.env` yang digunakan oleh **salah satu** dari kedua proses (umumnya bot, membiarkan dashboard sebagai pemilik scheduler, atau sebaliknya — keduanya berfungsi, cukup pilih satu).
+
+### Kesalahan umum
+
+| Kesalahan | Gejala | Perbaikan |
 |---|---|---|
-| Ringan / hanya CPU | Model instruction-tuned 7B–8B parameter | ~5–6 GB RAM |
-| Seimbang | Model instruction-tuned 13B–14B parameter | ~9–10 GB RAM |
-| Kualitas lebih tinggi, tersedia GPU | Model 30B+ parameter | Membutuhkan VRAM yang cukup; konsultasikan kartu model pilihan Anda |
+| Menjalankan `python app.py` dari root proyek alih-alih `bot/dashboard/` | `ModuleNotFoundError` atau aplikasi tidak menemukan template/file statisnya sendiri | Selalu `cd bot/dashboard` terlebih dahulu |
+| Menjalankan `python main.py` dari root proyek alih-alih `bot/` | `ModuleNotFoundError: No module named 'handlers'` (atau serupa) | Selalu `cd bot` terlebih dahulu |
+| Menjalankan baik dashboard maupun bot dengan scheduler aktif di keduanya | Laporan ganda, run pemindaian ganda, ukuran batch analisis AI berganda | Setel `RUN_SCHEDULER=false` pada salah satunya, sesuai §15.5 |
+| Mengharapkan chat AI mengatakan "not configured" saat `LLM_URL` tidak diset | Sebaliknya, ARGUS mencoba alamat LAN default bawaan dan menampilkan "ARGUS AI server is offline" | Ini perilaku yang benar dan terverifikasi — tidak ada state "not configured" terpisah; endpoint yang tidak dapat dijangkau (default atau kustom) selalu menghasilkan pesan "offline" |
 
-**Kuantisasi.** Model GGUF terkuantisasi 4-bit (Q4_K_M atau serupa) adalah default yang wajar untuk inferensi CPU — mereka menukar sedikit akurasi dengan pengurangan besar dalam jejak memori dan latensi. Gunakan presisi lebih tinggi (Q5/Q6/Q8 atau tanpa kuantisasi) hanya jika Anda memiliki keleluasaan RAM/VRAM dan menginginkan kualitas jawaban maksimum.
+**Lanjutkan ke [§16 Verifikasi Instalasi](#16-verifikasi-instalasi).**
 
-**CPU vs. GPU.** Inferensi CPU berfungsi tetapi terasa jauh lebih lambat per respons, yang lebih berpengaruh pada endpoint chat interaktif dibandingkan job analisis batch latar belakang (yang sudah mengatur tempo sendiri dengan jeda antar permintaan — lihat [§12](#12-konfigurasi-scheduler)). GPU dengan VRAM yang cukup untuk menampung model secara signifikan meningkatkan responsivitas chat.
+---
 
-### Memverifikasi server model
+## 16. Verifikasi Instalasi
 
-```bash
-curl http://127.0.0.1:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"messages":[{"role":"user","content":"Say OK if you can read this."}]}'
+### Tujuan
+
+Daftar periksa lengkap dan terurut yang memastikan setiap bagian ARGUS benar-benar berfungsi, bukan hanya bahwa proses dimulai tanpa crash.
+
+Setiap item menyertakan perintah persis, hasil yang diharapkan, dan apa yang harus dilakukan jika tidak cocok.
+
+| # | Pemeriksaan | Perintah / Tindakan | Hasil yang diharapkan | Jika gagal |
+|---|---|---|---|---|
+| 1 | Python terinstal | `python --version` (atau `python3 --version`) | `Python 3.11.x` atau lebih baru | [§4](#4-instalasi-python) |
+| 2 | pip terinstal | `pip --version` | String versi, tanpa error | [§4](#4-instalasi-python) |
+| 3 | Virtual environment aktif | Prompt menunjukkan `(venv)` | Ada | Jalankan ulang perintah `activate` dari [§4](#4-instalasi-python) |
+| 4 | Dependensi terinstal | `pip show flask psycopg2-binary` | Info paket ditunjukkan untuk keduanya | `pip install -r requirements.txt` lagi |
+| 5 | PostgreSQL dapat dijangkau | `psql -U postgres -d argus_db -c "SELECT 1;"` | `1` dikembalikan | [§6](#6-verifikasi-postgresql)–[§8](#8-menghubungkan-ke-postgresql) |
+| 6 | Seluruh 11 tabel ada | `psql -U postgres -d argus_db -c "\dt"` | 11 tabel tercantum (lihat [§12](#12-verifikasi-basis-data)) | [§11](#11-inisialisasi-skema) |
+| 7 | Seluruh 4 view ada | `psql -U postgres -d argus_db -c "\dv"` | 4 view tercantum | [§11](#11-inisialisasi-skema) |
+| 8 | Dashboard dimulai | `python app.py` dari `bot/dashboard/` | `Running on http://127.0.0.1:5000` | [§15](#15-menjalankan-argus), [§17](#17-pemecahan-masalah) |
+| 9 | Login berfungsi | Kunjungi `/login`, masuk sebagai `admin` | Halaman utama dashboard dimuat | Periksa `ADMIN_PASSWORD` di `.env` |
+| 10 | Pembuatan aset berfungsi | Tambah aset via `/add_asset` | Muncul di `/assets` | Periksa log dashboard |
+| 11 | Pemindaian berfungsi | Picu pemindaian pada aset dengan perangkat lunak yang diketahui | Baris baru muncul di `/findings` | Verifikasi konektivitas NVD (§9 dari [§14](#14-verifikasi-environment), atau periksa `NVD_API_KEY`) |
+| 12 | Laporan berfungsi | Picu laporan dari `/reports` | PDF yang dapat diunduh dihasilkan | Periksa log dashboard untuk output error generator laporan |
+| 13 | Risk engine berfungsi | Sebuah temuan menunjukkan `risk_score` bukan-nol di `/findings` | Skor mencerminkan CVSS/kritikalitas/KEV/EPSS | Periksa ulang field `criticality` aset dan nilai CVSS/KEV/EPSS CVE |
+| 14 | Laporan historis (grafik tren) | `/charts` dimuat tanpa error 500 | Grafik dirender | Pastikan `risk_snapshots` memiliki setidaknya satu baris (`SELECT * FROM risk_snapshots;`) — scheduler menulis satu baris/hari; bot Telegram juga menulis satu baris segera saat startup |
+| 15 | Bot Telegram merespons | Kirim `/start` ke bot Anda | Membalas "Argus Online 🟢" | [§15.3](#153-jalankan-bot-telegram-opsional-proses-terpisah), [§17](#17-pemecahan-masalah) |
+| 16 | Alert Telegram berfungsi | Picu pemindaian pada aset yang menghasilkan temuan baru | Pesan tiba di chat `CHAT_ID` | Pastikan baik `TOKEN` maupun `CHAT_ID` diset dengan benar |
+| 17 | Scheduler berjalan | Tunggu waktu terjadwal, atau periksa `risk_snapshots` bertambah satu baris per hari | Baris baru muncul setiap hari | [§15.5](#155-menjalankan-dashboard-dan-bot-bersamaan) |
+| 18 | Chat AI merespons | Ajukan pertanyaan ke asisten AI di dashboard | Jawaban relevan, berbasis data (bukan "offline") | [§15.4](#154-server-ai-opsional), [§14](#14-verifikasi-environment) |
+| 19 | Memori percakapan AI berfungsi | Ajukan pertanyaan lanjutan dalam percakapan yang sama | Jawaban AI mencerminkan konteks sebelumnya | Pastikan tabel `ai_conversations`/`ai_messages` ada ([§12](#12-verifikasi-basis-data)) |
+
+**Jika setiap baris dalam tabel ini lolos, ARGUS terinstal dengan benar.**
+
+---
+
+## 17. Pemecahan Masalah
+
+Setiap entri di bawah ini mengikuti struktur yang sama: **Gejala → Penyebab → Diagnosis → Pemulihan → Verifikasi.**
+
+### `psql` tidak dikenali
+
+- **Gejala:** `'psql' is not recognized as an internal or external command` (Windows) atau `psql: command not found` (Linux).
+- **Penyebab:** Alat client PostgreSQL tidak ada di `PATH` sistem Anda.
+- **Diagnosis:** `where psql` (Windows) / `which psql` (Linux) tidak mengembalikan apa pun.
+- **Pemulihan:** Lihat [§6 Verifikasi PostgreSQL](#6-verifikasi-postgresql) untuk langkah perbaikan PATH yang tepat per platform.
+- **Verifikasi:** `psql --version` mengembalikan string versi.
+
+### Connection refused
+
+- **Gejala:** `connection to server at "localhost" (...), port 5432 failed: Connection refused`.
+- **Penyebab:** Proses **server** PostgreSQL tidak berjalan (ini berbeda dari `psql`, client, yang tidak terinstal).
+- **Diagnosis:** `sudo systemctl status postgresql` (Linux) atau periksa `services.msc` (Windows) — status bukan "running"/"active".
+- **Pemulihan:** [§7 Layanan PostgreSQL](#7-layanan-postgresql).
+- **Verifikasi:** `ss -ltnp | grep 5432` (Linux) atau `netstat -ano | findstr 5432` (Windows) menunjukkan socket yang mendengarkan.
+
+### Password authentication failed
+
+- **Gejala:** `FATAL: password authentication failed for user "postgres"` (atau nama role apa pun).
+- **Penyebab:** Password yang salah diketik, atau `DB_PASSWORD` di `.env` tidak cocok dengan password role sebenarnya di PostgreSQL.
+- **Diagnosis:** Coba terhubung secara manual dengan `psql -U <role> -d argus_db -h localhost` menggunakan password persis dari `.env`.
+- **Pemulihan:** Reset password role: `ALTER USER <role> WITH PASSWORD 'password-baru';` (saat terhubung sebagai role dengan hak akses yang cukup), lalu perbarui `.env` agar cocok persis.
+- **Verifikasi:** Koneksi manual `psql` dari Diagnosis sekarang berhasil.
+
+### Database does not exist
+
+- **Gejala:** `FATAL: database "argus_db" does not exist` (atau nama apa pun di `DB_NAME`).
+- **Penyebab:** Basis data tidak pernah dibuat, dibuat dengan nama berbeda, atau `DB_NAME` di `.env` tidak cocok dengan nama basis data sebenarnya.
+- **Diagnosis:** `psql -U postgres -c "\l"` dan periksa ejaan/case persis setiap basis data yang tercantum.
+- **Pemulihan:** [§9 Pembuatan Basis Data](#9-pembuatan-basis-data) — buat basis data yang hilang, atau perbaiki `DB_NAME` di `.env` agar cocok dengan yang sudah ada.
+- **Verifikasi:** `psql -U postgres -d argus_db -c "SELECT 1;"` berhasil.
+
+### `relation "assets" does not exist` (atau `cves`, `matches`, tabel lain mana pun)
+
+- **Gejala:** ARGUS dimulai tanpa error terlihat, kemudian sebuah halaman dashboard atau perintah bot crash dengan error PostgreSQL persis ini.
+- **Penyebab:** `schema.sql` tidak pernah diterapkan — ini adalah kegagalan instalasi ARGUS dunia nyata paling umum tunggal. Fungsi perbaikan-skema internal dashboard sendiri mengasumsikan tabel-tabel ini sudah ada dan secara diam-diam tidak melakukan apa pun yang berguna jika tidak.
+- **Diagnosis:** `psql -U postgres -d argus_db -c "\dt"` — tabel yang hilang tidak tercantum.
+- **Pemulihan:** [§11 Inisialisasi Skema](#11-inisialisasi-skema) — terapkan `schema.sql`, lalu jalankan `migrate.py`.
+- **Verifikasi:** [§12 Verifikasi Basis Data](#12-verifikasi-basis-data) — seluruh 11 tabel dan 4 view ada.
+
+### Permission denied (basis data)
+
+- **Gejala:** `permission denied for table assets`, `permission denied for database argus_db`, atau serupa saat menerapkan `schema.sql` atau menjalankan ARGUS.
+- **Penyebab:** Role tempat ARGUS/Anda terhubung tidak memiliki, atau belum diberi hak akses pada, objek yang relevan.
+- **Diagnosis:** Bandingkan kolom `Owner` pada output `\dt`/`\l` terhadap role di `DB_USER`.
+- **Pemulihan:** [§10 Pengguna PostgreSQL](#10-pengguna-postgresql) — baik terhubung sebagai role pemilik, atau jalankan ulang perintah `ALTER DATABASE ... OWNER TO ...` / `GRANT` untuk role yang benar-benar ingin Anda gunakan.
+- **Verifikasi:** Operasi yang gagal berhasil saat dicoba ulang sebagai role dengan hak akses yang benar.
+
+### Wrong `DB_NAME`
+
+- **Gejala:** Semuanya tentang instalasi "tampak benar" tetapi ARGUS masih tidak dapat menemukan datanya, atau terhubung ke basis data yang kosong/salah.
+- **Penyebab:** `DB_NAME` di `.env` tidak cocok persis dengan basis data yang benar-benar Anda terapkan `schema.sql` ke sana.
+- **Diagnosis:** `echo` atau buka `.env` dan bandingkan `DB_NAME` karakter demi karakter terhadap output `\l`.
+- **Pemulihan:** Perbaiki `.env`, atau ganti nama basis data agar cocok: `ALTER DATABASE <nama_salah> RENAME TO argus_db;`.
+- **Verifikasi:** [§12 Verifikasi Basis Data](#12-verifikasi-basis-data).
+
+### Wrong database owner
+
+- Lihat **Permission denied (basis data)** di atas — ini masalah dasar yang sama.
+
+### Missing tables (hanya sebagian tabel ada)
+
+- **Gejala:** `\dt` menunjukkan `assets`/`cves`/`matches`/`alerts`/`reports`/`users` tetapi hilang `ai_conversations`, `ai_messages`, `cve_ai_analysis`, `risk_snapshots`, atau `ai_response_cache`.
+- **Penyebab:** `schema.sql` diterapkan, tetapi `migrate.py` tidak pernah dijalankan — `schema.sql` sama sekali tidak membuat kelima tabel ini.
+- **Diagnosis:** Bandingkan output `\dt` Anda terhadap daftar 11-tabel lengkap di [§12](#12-verifikasi-basis-data).
+- **Pemulihan:** `cd bot && python database/migrate.py`.
+- **Verifikasi:** `\dt` sekarang menunjukkan seluruh 11 tabel.
+
+### `.env` salah (variabel yang tidak ada di ARGUS)
+
+- **Gejala:** Pengaturan yang Anda konfigurasi tampak sepenuhnya diabaikan.
+- **Penyebab:** Anda menggunakan nama variabel dari konvensi proyek lain (misalnya, `DATABASE_URL`, `POSTGRES_PASSWORD`, `TELEGRAM_TOKEN`, `OLLAMA_HOST`) yang tidak pernah dibaca kode ARGUS.
+- **Diagnosis:** Bandingkan `.env` Anda baris demi baris terhadap tabel variabel otoritatif di [§13](#13-konfigurasi-environment) — daftar ini dibangun langsung dari setiap pemanggilan `os.getenv`/`os.environ.get` dalam basis kode; tidak ada yang lain.
+- **Pemulihan:** Ganti nama variabel ke nama sebenarnya milik ARGUS.
+- **Verifikasi:** Perilaku yang dimaksudkan (koneksi DB yang benar, token bot yang benar, dll.) sekarang berlaku.
+
+### Migration failed (`migrate.py` mencetak `FAILED`)
+
+- **Gejala:** Satu atau lebih baris dalam output `migrate.py` bertuliskan `FAILED` diikuti error basis data.
+- **Penyebab:** Hampir selalu: `schema.sql` tidak diterapkan terlebih dahulu (lihat bagian khusus di atas), atau state migrasi parsial/tidak konsisten sebelumnya.
+- **Diagnosis:** Baca teks error persis yang dicetak setelah `FAILED` — itu error PostgreSQL sebenarnya, bukan pesan ARGUS generik.
+- **Pemulihan:** Terapkan `schema.sql` jika belum, lalu jalankan ulang `migrate.py` — sepenuhnya idempoten dan aman dijalankan ulang setelah memperbaiki penyebab yang mendasarinya.
+- **Verifikasi:** Menjalankan ulang menunjukkan `OK` untuk setiap langkah.
+
+### Schema import failed (`ERROR` saat menjalankan `schema.sql`)
+
+- **Gejala:** `psql -f bot/database/schema.sql` mencetak satu atau lebih baris `ERROR:` alih-alih `CREATE TABLE`/`CREATE INDEX`/`DO`.
+- **Penyebab:** Umumnya: basis data yang salah dipilih (flag `-d`), hak akses tidak cukup, atau upaya sebelumnya yang diterapkan sebagian meninggalkan objek dalam state yang tidak konsisten.
+- **Diagnosis:** Baca teks `ERROR:` spesifik — ia menyebutkan objek dan alasan yang tepat.
+- **Pemulihan:** Untuk memulai bersih, drop dan buat ulang basis data ([§9](#9-pembuatan-basis-data)) dan terapkan ulang `schema.sql` dari awal.
+- **Verifikasi:** Jalankan ulang penuh menunjukkan tidak ada baris `ERROR:`.
+
+### Flask dashboard crash saat startup
+
+- **Gejala:** `RuntimeError: SECRET_KEY is missing. Add a long random SECRET_KEY to the .env file.`
+- **Penyebab:** `SECRET_KEY` tidak diset di `.env`, atau `.env` tidak ditemukan (lihat catatan direktori-kerja di [§13](#13-konfigurasi-environment)).
+- **Diagnosis:** `grep SECRET_KEY .env` dari dalam proyek.
+- **Pemulihan:** Tambahkan `SECRET_KEY=<nilai acak>` ke `.env`, dihasilkan via `python -c "import secrets; print(secrets.token_hex(32))"`.
+- **Verifikasi:** `python app.py` (dari `bot/dashboard/`) dimulai tanpa error ini.
+
+### Scheduler not running
+
+- **Gejala:** `risk_snapshots` tidak pernah mendapat baris baru; laporan tidak pernah dihasilkan sesuai jadwal.
+- **Penyebab:** `RUN_SCHEDULER=false` diset di `.env` yang digunakan setiap proses yang Anda jalankan, atau proses terus crash/restart sebelum mencapai waktu terjadwal.
+- **Diagnosis:** Periksa `RUN_SCHEDULER` di `.env`; periksa uptime/log proses untuk crash loop.
+- **Pemulihan:** Pastikan setidaknya satu proses yang berjalan memiliki `RUN_SCHEDULER` tidak diset atau `true`. Lihat [§15.5](#155-menjalankan-dashboard-dan-bot-bersamaan) jika menjalankan baik dashboard maupun bot.
+- **Verifikasi:** `SELECT * FROM risk_snapshots ORDER BY id DESC LIMIT 1;` menunjukkan baris terbaru.
+
+### AI unavailable
+
+- **Gejala:** Chat AI membalas "ARGUS AI server is offline. Please start the LLM server."
+- **Penyebab:** `LLM_URL` menunjuk ke alamat yang tidak dapat dijangkau — baik IP LAN default bawaan (jika Anda tidak pernah menyetel sendiri) atau kustom yang sebenarnya tidak berjalan.
+- **Diagnosis:** Uji `curl` [§14 Verifikasi Environment](#14-verifikasi-environment) terhadap `LLM_URL` Anda.
+- **Pemulihan:** [§15.4 Server AI opsional](#154-server-ai-opsional) — instal dan jalankan server LLM, dan arahkan `LLM_URL` ke sana.
+- **Verifikasi:** Uji `curl` mengembalikan respons JSON dengan `"choices"`.
+
+### Telegram failures
+
+- **Gejala:** Bot tidak merespons perintah apa pun; atau alert tidak pernah tiba meskipun pemindaian menghasilkan temuan.
+- **Penyebab:** `TOKEN` tidak valid/hilang (bot sama sekali tidak merespons), atau `CHAT_ID` hilang/salah (bot merespons perintah tetapi alert tidak pernah tiba).
+- **Diagnosis:** Uji [§14](#14-verifikasi-environment) `curl .../getMe` untuk token; turunkan ulang `CHAT_ID` via `getUpdates` setelah mengirim pesan ke bot.
+- **Pemulihan:** [§13](#13-konfigurasi-environment) untuk nama variabel persis; buat ulang token via **@BotFather** jika perlu.
+- **Verifikasi:** `/start` mendapat balasan; pemindaian dengan temuan baru menghasilkan pesan Telegram.
+
+### Port already in use
+
+- **Gejala:** `OSError: [Errno 98] Address already in use` (Linux) atau `OSError: [WinError 10048]` (Windows) saat memulai dashboard.
+- **Penyebab:** Sesuatu yang lain (sering proses ARGUS sebelumnya yang masih berjalan) sudah terikat ke port 5000.
+- **Diagnosis:** `lsof -i :5000` (Linux) atau `netstat -ano | findstr :5000` (Windows).
+- **Pemulihan:** Hentikan proses yang menggunakan port tersebut, atau ubah port dengan menyunting pemanggilan `app.run(...)` di bagian bawah `bot/dashboard/app.py` (saat ini tidak ada variabel environment untuk ini — lihat daftar variabel otoritatif [§13](#13-konfigurasi-environment), yang tidak menyertakan pengaturan port untuk dashboard itu sendiri).
+- **Verifikasi:** Dashboard dimulai dan mencetak `Running on http://127.0.0.1:5000` (atau port pilihan Anda).
+
+### Windows firewall
+
+- **Gejala:** ARGUS berjalan secara lokal tetapi tidak dapat dijangkau dari perangkat lain di jaringan Anda.
+- **Penyebab:** Windows Defender Firewall memblokir koneksi masuk (inbound) ke Python/port 5000.
+- **Diagnosis:** Coba akses `http://<ip-lan-mesin-anda>:5000` dari perangkat lain; jika menggantung/timeout (tetapi `localhost:5000` berfungsi baik di mesin yang sama), ini hampir selalu firewall.
+- **Pemulihan:** Windows Security → Firewall & network protection → Allow an app through firewall → tambahkan Python (atau izinkan port 5000 secara spesifik via "Advanced settings" → Inbound Rules → New Rule).
+- **Verifikasi:** Perangkat lain sekarang dapat memuat dashboard.
+
+### Linux firewall
+
+- **Gejala:** Sama seperti di atas, di Linux.
+- **Penyebab:** `ufw`/`firewalld`/`iptables` memblokir port 5000 (atau 5432 untuk akses basis data jarak jauh langsung).
+- **Pemulihan:** misalnya, dengan `ufw`: `sudo ufw allow 5000/tcp`.
+- **Verifikasi:** Dashboard dapat dijangkau dari perangkat lain di jaringan.
+
+### PATH issues
+
+- Lihat **`psql` tidak dikenali** di atas, dan [§4](#4-instalasi-python)/[§6](#6-verifikasi-postgresql) untuk langkah perbaikan khusus-platform untuk Python dan PostgreSQL masing-masing.
+
+### Virtual environment issues
+
+- **Gejala:** `pip install` tampak berhasil tetapi ARGUS masih melaporkan modul hilang.
+- **Penyebab:** Virtual environment sebenarnya tidak aktif saat Anda menjalankan `pip install`, atau Anda memiliki beberapa instalasi Python dan mengaktifkan yang salah.
+- **Diagnosis:** `which python` (Linux) / `where python` (Windows) — apakah path menunjuk ke dalam folder `venv/` proyek Anda?
+- **Pemulihan:** Nonaktifkan (`deactivate`), hapus folder `venv/`, buat ulang, aktifkan ulang, dan instal ulang dependensi — lihat [§4](#4-instalasi-python).
+- **Verifikasi:** `pip show flask` menunjukkan path `Location:` di dalam `venv/`.
+
+### Package installation failures
+
+- **Gejala:** `pip install -r requirements.txt` gagal di tengah jalan, sering mencoba mengompilasi paket dari sumber kode.
+- **Penyebab:** Tidak ada wheel prebuilt yang tersedia untuk kombinasi versi Python/OS/arsitektur Anda yang spesifik untuk salah satu paket yang dikunci (umumnya `psycopg2-binary`, `matplotlib`, `numpy`, atau `pillow`).
+- **Pemulihan:** Pastikan Anda menggunakan versi Python standar dan terbaru (3.11/3.12) pada OS 64-bit, di mana wheel prebuilt untuk paket-paket ini dipublikasikan. Di Linux, memasang compiler C dan header client PostgreSQL (`sudo apt install build-essential libpq-dev`) memungkinkan build dari sumber kode sebagai fallback. Di Windows, pasang [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist) jika Anda melihat error pemuatan DLL setelah instalasi.
+- **Verifikasi:** `pip install -r requirements.txt` selesai tanpa error.
+
+### Dependency conflicts
+
+- **Gejala:** `pip` melaporkan konflik versi antar paket.
+- **Penyebab:** Menginstal dependensi ARGUS ke environment Python yang sudah memiliki paket lain yang berkonflik terinstal.
+- **Pemulihan:** Selalu gunakan virtual environment baru yang didedikasikan untuk ARGUS (lihat [§4](#4-instalasi-python)) alih-alih Python sistem Anda atau environment yang dibagikan dengan proyek lain.
+- **Verifikasi:** `pip install -r requirements.txt` selesai dengan bersih di environment baru.
+
+### Database lock
+
+- **Gejala:** Sebuah query atau run `schema.sql`/`migrate.py` tampak menggantung tanpa batas.
+- **Penyebab:** Sesi lain (umumnya sesi `psql` yang terbuka dengan transaksi yang belum di-commit) memegang lock pada tabel yang sama.
+- **Diagnosis:** Dari sesi `psql` terpisah: `SELECT * FROM pg_locks WHERE NOT granted;` dan `SELECT * FROM pg_stat_activity;` untuk mengidentifikasi sesi yang memblokir.
+- **Pemulihan:** Tutup sesi yang memblokir (keluar dari jendela `psql` lain, atau `SELECT pg_terminate_backend(<pid>);` untuk ID proses yang bermasalah) — gunakan ini dengan hati-hati, karena ini memaksa mengakhiri pekerjaan sesi tersebut.
+- **Verifikasi:** Perintah yang awalnya menggantung selesai.
+
+### Database permissions
+
+- Lihat **Permission denied (basis data)** di atas.
+
+### Masalah `search_path`
+
+- **Gejala:** Sebuah tabel yang dapat Anda lihat dengan `\dt` masih menghasilkan `relation "..." does not exist` dari alat atau koneksi tertentu.
+- **Penyebab:** ARGUS selalu menggunakan nama tabel yang sepenuhnya diselesaikan, tidak berkualifikasi terhadap schema `public` standar, dan tidak membuat apa pun di luar `public` — `search_path` yang tidak cocok hampir selalu merupakan gejala terhubung ke **basis data yang sama sekali salah**, bukan masalah penamaan-schema sebenarnya di dalam ARGUS itu sendiri.
+- **Diagnosis:** `\dn` untuk mendaftar schema, dan pastikan ulang Anda terhubung ke `argus_db` secara spesifik, bukan basis data lain yang kebetulan berbagi nama tabel.
+- **Pemulihan:** Hubungkan ulang dengan flag `-d argus_db` eksplisit; tidak ada apa pun dalam skema ARGUS sendiri yang perlu dikonfigurasi terkait `search_path`.
+- **Verifikasi:** [§12 Verifikasi Basis Data](#12-verifikasi-basis-data).
+
+### Beberapa basis data PostgreSQL (kebingungan `argus` vs. `argus_db`)
+
+- **Gejala:** Beberapa data tampak "menghilang," atau ARGUS berperilaku seolah-olah baru diinstal padahal Anda sebelumnya sudah menambahkan data.
+- **Penyebab:** Data dimasukkan ke satu basis data (misalnya, secara manual, ke basis data bernama `argus`) sementara ARGUS sendiri dikonfigurasi (via `DB_NAME`) untuk menggunakan yang berbeda (`argus_db`, default sebenarnya).
+- **Diagnosis:** `psql -U postgres -c "\l"` dan periksa setiap basis data untuk tabel yang bersangkutan (`\c <namadb>` lalu `\dt` di dalam masing-masing).
+- **Pemulihan:** Konsolidasikan — baik migrasikan data ke basis data yang benar-benar digunakan ARGUS, atau arahkan `DB_NAME` ke basis data yang benar-benar menyimpan data Anda. **`argus_db` adalah default yang benar yang diharapkan basis kode ini; perlakukan nama lain apa pun sebagai pengecualian, bukan norma.**
+- **Verifikasi:** [§12 Verifikasi Basis Data](#12-verifikasi-basis-data) terhadap basis data yang benar-benar dikonfigurasi digunakan ARGUS.
+
+---
+
+## 18. Deployment Produksi
+
+### Tujuan
+
+Jelaskan cara menjalankan ARGUS secara aman dan andal di luar mesin developer tunggal.
+
+### Arsitektur
+
+```mermaid
+flowchart LR
+    Internet["Internet / klien LAN"] -->|HTTPS 443| Proxy["Reverse proxy\n(nginx / Caddy)\nTerminasi TLS"]
+    Proxy -->|HTTP 127.0.0.1:5000| WSGI["Server WSGI\n(misalnya Gunicorn)"]
+    WSGI --> App["Aplikasi Flask ARGUS\n(bot/dashboard/app.py)"]
+    App --> DB[("PostgreSQL\ndifirewall, jaringan privat")]
+    App -.hanya LAN.-> LLM["Server LLM lokal\n(opsional)"]
+    Bot["Proses bot Telegram\n(bot/main.py)"] --> DB
+    Bot -->|HTTPS| TG["Telegram Bot API"]
 ```
 
-Respons yang berhasil berisi field `choices[0].message.content`. Jika ini gagal, fitur AI ARGUS akan gagal dengan cara yang sama — verifikasi di lapisan ini terlebih dahulu sebelum memecahkan masalah di dalam ARGUS.
+### Fakta penting dan terverifikasi tentang deployment produksi
 
-### Bagaimana ARGUS terhubung ke model
+- **ARGUS tidak menyertakan Dockerfile, `docker-compose.yml`, dependensi Gunicorn, atau konfigurasi Nginx.** Tidak ada satu pun dari ini yang ada di mana pun dalam pohon kode sumber saat ini. Dukungan Docker hanyalah **Fitur Direncanakan** — tidak ada apa pun di sini yang langsung berfungsi hari ini; panduan di bawah menjelaskan cara menambahkan bagian-bagian ini sendiri.
+- **Jangan pernah menjalankan development server Flask (`python app.py`) langsung di produksi.** Ia bersifat single-threaded secara default dan tidak diperkeras untuk trafik yang bermusuhan/tidak tepercaya. Gunakan server WSGI sungguhan di depannya.
+- **`app.py` melakukan perbaikan skema dan memulai scheduler latar belakang pada saat import** ([§11](#11-inisialisasi-skema)). Jika Anda menjalankannya di bawah server WSGI dengan banyak proses worker, setiap worker secara independen meng-import modul — artinya scheduler (dan pemindaian harian, laporan, serta job analisis AI-nya) akan berjalan sekali **per worker**, menduplikasi segalanya. **Gunakan tepat satu proses worker** untuk dashboard, dan skalakan konkurensi penanganan permintaan dengan thread sebagai gantinya, atau jalankan scheduler dari hanya satu proses khusus dengan `RUN_SCHEDULER=false` diset pada yang lain.
 
-Setel `LLM_URL` di `.env` ke URL completions lengkap (lihat contoh di [§7](#7-konfigurasi-environment)). ARGUS mengirim system prompt beserta pesan pengguna (dan, untuk chat, riwayat percakapan terkini) sebagai array `messages` standar dengan `temperature: 0.3` dan batas atas `max_tokens`, lalu membaca kembali `choices[0].message.content`. Tidak ada konfigurasi lebih lanjut di sisi ARGUS (pemilihan nama model, kunci API) yang dibutuhkan kecuali server spesifik Anda mensyaratkannya sebagai bagian dari permintaan — dalam hal ini hal tersebut berada di luar permukaan konfigurasi ARGUS saat ini dan perlu ditangani pada lapisan server/proxy di depan `LLM_URL`.
+### Ubuntu Server + Gunicorn + Nginx + systemd
 
----
-
-## 9. Konfigurasi API Eksternal
-
-| Layanan | Autentikasi | Catatan |
-|---|---|---|
-| **NVD API** | `NVD_API_KEY` opsional | Minta kunci gratis di [halaman permintaan kunci API NVD](https://nvd.nist.gov/developers/request-an-api-key). Permintaan tanpa autentikasi dibatasi rate-nya jauh lebih agresif dibanding yang terautentikasi; kunci sangat direkomendasikan untuk inventaris apa pun yang melebihi segelintir aset. Klien ini melakukan fallback secara otomatis dari CVSS v3.1 → v3.0 → v2 tergantung apa yang dipublikasikan oleh catatan CVE tertentu. |
-| **Feed CISA KEV** | Tidak diperlukan | Feed JSON publik, diambil dan di-cache dalam memori selama 24 jam dengan retry/backoff pada kegagalan sementara. Tidak perlu konfigurasi. |
-| **FIRST EPSS API** | Tidak diperlukan | API publik, ditanyakan dalam satu permintaan batch per pemindaian aset untuk meminimalkan volume panggilan. Tidak perlu konfigurasi. |
-| **OpenCVE** | T/A | Direferensikan dalam dokumentasi ARGUS yang lebih luas sebagai proyek sumber data terkait, tetapi **tidak ada klien OpenCVE atau konfigurasi `OPENCVE_URL` dalam basis kode saat ini.** Jangan menyetel variabel `OPENCVE_URL` dengan berharap ia akan dibaca. |
-| **Feed threat intelligence masa depan** | T/A | Direncanakan — lihat `README.md` §17 Peta Jalan. Belum ada permukaan konfigurasi untuk ini. |
-
-### Rate limit dan timeout
-
-- NVD: permintaan tanpa autentikasi dibatasi pada sejumlah kecil permintaan per jendela waktu 30 detik; kunci API menaikkan batas ini secara substansial. ARGUS saat ini tidak mengimplementasikan rate limiting tambahan di sisi klien sendiri di luar apa yang disediakan oleh pengaturan tempo permintaan klien NVD — jika Anda mengelola inventaris yang sangat besar, pemindaian mungkin memakan waktu proporsional lebih lama alih-alih gagal total.
-- KEV: cache dalam memori selama 24 jam berarti ARGUS melakukan paling banyak satu permintaan feed KEV per hari dalam operasi normal, terlepas dari jumlah aset.
-- Endpoint LLM: permintaan menggunakan timeout 120 detik di `bot/Ai/llm.py`; model lokal yang membutuhkan waktu lebih lama dari ini untuk merespons akan muncul sebagai error timeout ke pemanggil.
-
-### Pengujian konektivitas
-
-```bash
-# NVD
-curl -s "https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=1"
-
-# CISA KEV
-curl -s "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json" | head -c 200
-```
-
-Keduanya seharusnya mengembalikan JSON. Jika salah satu gagal dari lingkungan deployment Anda, periksa aturan firewall/proxy keluar sebelum memecahkan masalah di dalam ARGUS.
-
----
-
-## 10. Konfigurasi Bot Telegram
-
-Bot Telegram bersifat opsional — dashboard berfungsi sepenuhnya tanpanya.
-
-### 10.1 Membuat bot dan mendapatkan token
-
-1. Di Telegram, kirim pesan ke **@BotFather**.
-2. Kirim `/newbot` dan ikuti petunjuknya (pilih nama tampilan dan username unik yang diakhiri `bot`).
-3. BotFather mengembalikan token dalam bentuk `123456789:ABCdefGhIJKlmNoPQRsTUVwxyz`. Ini adalah `TOKEN` Anda.
-
-### 10.2 Mendapatkan chat ID untuk alert
-
-1. Kirim pesan apa pun ke bot baru Anda (atau tambahkan ke grup/channel).
-2. Kunjungi `https://api.telegram.org/bot<TOKEN>/getUpdates` di browser atau dengan `curl` setelah mengirim pesan.
-3. Temukan `"chat":{"id": ...}` pada respons — nilai numerik tersebut (mungkin negatif, untuk grup) adalah `CHAT_ID` Anda.
-
-### 10.3 Izin bot
-
-Untuk chat pribadi satu-lawan-satu, tidak ada izin khusus yang dibutuhkan. Untuk grup atau channel, pastikan bot memiliki izin mengirim pesan (dan, jika Anda membatasi siapa yang dapat memposting, bot ditambahkan sebagai admin atau secara eksplisit diizinkan memposting).
-
-### 10.4 Konfigurasi environment
-
-Setel `TOKEN` dan `CHAT_ID` di `.env` seperti ditunjukkan di [§7](#7-konfigurasi-environment). `TOKEN` wajib agar proses bot dapat berjalan sama sekali; `CHAT_ID` wajib hanya untuk pengiriman alert — perintah interaktif bot berfungsi tanpanya, tetapi alert pemindaian akan dilewati secara diam-diam jika tidak diset.
-
-### 10.5 Menjalankan bot
-
-```bash
-cd bot
-python main.py
-```
-
-### 10.6 Menguji perintah
-
-Di chat Telegram Anda dengan bot, kirim `/start` — Anda seharusnya menerima "Argus Online 🟢". Kemudian coba `/help` untuk daftar perintah lengkap, dan `/status` untuk memastikan bot dapat menjangkau baik PostgreSQL maupun NVD API.
-
-### 10.7 Pemecahan masalah
-
-| Gejala | Penyebab | Perbaikan |
-|---|---|---|
-| Proses bot langsung keluar dengan `RuntimeError: TOKEN environment variable is not set` | `.env` tidak memiliki `TOKEN`, atau bot tidak dijalankan dari direktori tempat `.env` dapat ditemukan | Setel `TOKEN`; jalankan `python main.py` dari direktori `bot/` |
-| Bot sama sekali tidak merespons | Token tidak valid, atau bot diblokir/belum dimulai oleh pengguna | Verifikasi ulang token dengan BotFather; pastikan Anda sudah mengirim `/start` ke bot terlebih dahulu |
-| Alert tidak pernah masuk | `CHAT_ID` tidak diset atau salah | Turunkan ulang `CHAT_ID` melalui `getUpdates` seperti ditunjukkan di atas |
-| `/status` melaporkan kegagalan basis data | PostgreSQL tidak terjangkau atau kredensial salah | Verifikasi ulang variabel `DB_*` dan pastikan PostgreSQL berjalan (lihat [§18](#18-pemecahan-masalah)) |
-
----
-
-## 11. Konfigurasi Dashboard
-
-Dashboard adalah aplikasi Flask standar (`app.py`) dengan perilaku berikut yang sudah tertanam:
-
-- **Host/port** — Saat dijalankan langsung (`python app.py`), dashboard terikat (bind) ke `0.0.0.0:5000`. Tidak ada variabel environment untuk mengubah ini pada jalur run-langsung; sunting pemanggilan `app.run(...)` di bagian bawah `app.py`, atau ikat host/port yang berbeda pada lapisan server WSGI di produksi (lihat [§23](#23-deployment-produksi)).
-- **Mode debug** — Di-hardcode ke `debug=False` pada jalur run-langsung. Jangan mengaktifkan mode debug Flask pada deployment apa pun yang dapat dijangkau oleh siapa pun selain Anda — mode ini mengekspos debugger interaktif yang mampu melakukan eksekusi kode arbitrer.
-- **Mode produksi** — Untuk apa pun di luar pengujian lokal, jalankan di balik Gunicorn alih-alih `python app.py`; lihat [§23](#23-deployment-produksi) untuk perintah yang tepat dan batasan single-worker.
-- **Secret key** — `SECRET_KEY` dari `.env`, wajib saat startup (lihat [§7](#7-konfigurasi-environment)).
-- **Konfigurasi sesi** — Cookie `HttpOnly`, `SameSite=Lax`, secure-by-default (`SESSION_COOKIE_SECURE`), dan masa berlaku sesi tetap 8 jam.
-- **File statis** — Dilayani dari `bot/dashboard/static/` oleh penanganan file statis default Flask; di produksi, pertimbangkan untuk melayani file-file ini langsung dari reverse proxy Anda demi performa yang lebih baik (lihat [§23](#23-deployment-produksi)).
-- **Laporan yang dihasilkan** — Ditulis ke `bot/dashboard/generated_reports/`, dibuat secara otomatis saat startup jika belum ada. Path ini saat ini bersifat tetap, bukan dapat dikonfigurasi lewat environment.
-
----
-
-## 12. Konfigurasi Scheduler
-
-ARGUS menggunakan APScheduler untuk menjalankan job latar belakang berikut, semuanya didefinisikan di `bot/jobs/daily_scan.py`:
-
-| Job | Jadwal | Tujuan |
-|---|---|---|
-| Pemindaian harian | Setiap hari pukul 06:00 | Memindai ulang semua aset terhadap NVD/KEV/EPSS |
-| Snapshot risiko | Setiap hari pukul 06:30 | Mencatat agregat risiko pada satu titik waktu untuk grafik tren |
-| Laporan mingguan | Setiap Senin pukul 07:00 | Menghasilkan laporan PDF mingguan |
-| Laporan bulanan | Tanggal 1 setiap bulan pukul 07:00 | Menghasilkan laporan PDF bulanan |
-| Batch analisis AI | Setiap 5 menit | Memproses hingga 5 CVE yang tertunda (pending) melalui pipeline analisis AI |
-| Watchdog analisis AI | Setiap 5 menit | Memulihkan baris analisis yang macet dalam status `processing` setelah terjadi crash |
-| Pembersihan cache chat | Setiap 30 menit | Menghapus entri cache respons chat AI yang sudah kedaluwarsa |
-
-**Zona waktu.** Semua jadwal bergaya cron di atas berjalan pada zona waktu host/proses yang menjalankan scheduler (default APScheduler adalah zona waktu sistem lokal kecuali environment proses menentukan lain). Setel zona waktu sistem server Anda secara sengaja — pemindaian harian pukul `06:00` berarti 06:00 **lokal pada mesin tersebut**, bukan UTC, kecuali Anda telah secara eksplisit mengonfigurasi OS ke UTC.
-
-**Siapa yang memulai scheduler.** Baik `app.py` maupun `bot/main.py` mampu memulai scheduler pada startup-nya masing-masing. Jika Anda menjalankan kedua proses secara bersamaan (dashboard + bot) di bawah supervisor yang sama, setel `RUN_SCHEDULER=false` pada **salah satu** dari keduanya — jika tidak, setiap job berjalan dua kali, menggandakan frekuensi pemindaian, duplikasi pembuatan laporan, dan duplikasi batch analisis AI. `RUN_SCHEDULER` defaultnya `true` (aktif) jika tidak diset.
-
-**Verifikasi job.** Log aplikasi (lihat [§19](#19-logging)) mencatat dimulainya scheduler dan setiap pemanggilan job. Untuk memverifikasi job telah terdaftar tanpa menunggu waktu terjadwal, periksa baris log yang dicetak saat startup yang mengonfirmasi scheduler telah dimulai, dan periksa tabel `risk_snapshots` yang bertambah setiap hari sebagai konfirmasi eksternal bahwa job memang benar-benar berjalan:
-
-```sql
-SELECT * FROM risk_snapshots ORDER BY id DESC LIMIT 5;
-```
-
-**Pemecahan masalah.** Jika job terjadwal tampaknya tidak pernah berjalan: pastikan `RUN_SCHEDULER` tidak diset ke `false` pada setiap proses, pastikan proses tetap berjalan (proses yang crash/restart tidak pernah mencapai penjadwalan steady-state), dan periksa `SchedulerAlreadyRunningError` pada log, yang menandakan modul di-import ulang dan `scheduler.start()` dipanggil dua kali dalam proses yang sama (ini sudah dijaga/di-guard, tetapi patut disingkirkan kemungkinannya jika menggunakan konfigurasi WSGI/reload proses yang tidak biasa).
-
----
-
-## 13. Menjalankan ARGUS
-
-### Urutan startup
-
-```
-PostgreSQL
-    ↓
-Dashboard (app.py) dan/atau Bot Telegram (bot/main.py)
-    ↓
-Scheduler (dimulai otomatis oleh yang mana pun dari keduanya yang dimulai lebih dulu, sesuai RUN_SCHEDULER)
-    ↓
-AI (hanya jika LLM_URL dikonfigurasi — digunakan sesuai permintaan oleh chat dan oleh job analisis AI milik scheduler)
-    ↓
-Scanner (dipanggil sesuai permintaan melalui dashboard/bot, dan otomatis oleh job pemindaian harian)
-```
-
-**Mengapa urutan penting.** PostgreSQL harus dapat dijangkau sebelum dashboard maupun bot dimulai, karena keduanya memanggil logika migrasi skema dan membaca/menulis data segera saat startup — memulai salah satunya terhadap basis data yang tidak terjangkau menghasilkan error koneksi segera (lihat [§18](#18-pemecahan-masalah)). Scheduler, lapisan AI, dan scanner bukan proses terpisah yang Anda mulai sendiri — mereka dipanggil oleh proses dashboard/bot, sehingga tidak ada langkah terpisah "mulai scheduler" atau "mulai scanner" di luar menjalankan `app.py` dan/atau `bot/main.py` yang dikonfigurasi dengan benar.
-
-### Memulai dashboard
-
-```bash
-source venv/bin/activate   # Windows: venv\Scripts\Activate.ps1
-python app.py
-```
-
-Kunjungi `http://localhost:5000` (atau host/port yang Anda konfigurasi) di browser.
-
-### Memulai bot Telegram (opsional, proses terpisah)
-
-```bash
-source venv/bin/activate
-cd bot
-python main.py
-```
-
-Anda dapat menjalankan dashboard dan bot pada mesin yang sama atau mesin yang berbeda, selama keduanya dapat menjangkau basis data PostgreSQL yang sama dan Anda telah menyetel `RUN_SCHEDULER` dengan benar sesuai [§12](#12-konfigurasi-scheduler) jika menjalankan keduanya.
-
----
-
-## 14. Konfigurasi Pertama Kali
-
-1. **Masuk (login) sebagai administrator bawaan.** Buka `/login` dan masuk dengan username `admin` dan password yang Anda setel sebagai `ADMIN_PASSWORD`.
-2. **(Opsional) Buat pengguna tambahan.** Gunakan `/register` untuk membuat akun swalayan (self-service); akun baru default ke peran `viewer`. Untuk memberikan peran `admin`, perbarui peran tersebut langsung di basis data: `UPDATE users SET role = 'admin' WHERE username = 'namaanda';`
-3. **Tambahkan aset pertama Anda.** Dari dashboard, buka `/add_asset` dan isi vendor, produk, versi, dan tipe — atau via Telegram, kirim `/add Vendor Produk Versi [Tipe]`.
-4. **Jalankan pemindaian pertama Anda.** Dari halaman detail aset, picu sebuah pemindaian — atau via Telegram, `/scan <asset_id>`.
-5. **Tinjau temuan.** Periksa `/findings` di dashboard, atau `/findings <asset_id>` di Telegram, untuk memastikan CVE yang cocok muncul beserta indikator severity dan KEV.
-6. **Hasilkan laporan pertama Anda.** Dari `/reports`, picu laporan sesuai permintaan — atau via Telegram, `/report`.
-7. **Uji chat AI** (jika `LLM_URL` dikonfigurasi). Buka antarmuka chat dashboard dan ajukan pertanyaan seperti "apa yang harus saya perbaiki terlebih dahulu?" — pastikan Anda mendapatkan jawaban yang berbasis data, merujuk pada temuan aktual Anda, bukan respons generik.
-8. **Uji alert** (jika bot dikonfigurasi). Jalankan pemindaian pada aset dengan setidaknya satu temuan dan pastikan pesan alert gabungan tiba di chat `CHAT_ID` yang Anda konfigurasi.
-9. **Verifikasi instalasi** menggunakan daftar periksa di [§15](#15-daftar-periksa-verifikasi).
-
----
-
-## 15. Daftar Periksa Verifikasi
-
-- [ ] Dashboard dimuat di `/` dan `/login` tanpa error
-- [ ] Login berhasil dengan akun bawaan `admin` dan `viewer`
-- [ ] Konektivitas basis data terkonfirmasi — `psql` berhasil terhubung, dan `\dt` menampilkan daftar tabel ARGUS
-- [ ] Sebuah aset dapat ditambahkan dan muncul di `/assets`
-- [ ] Sebuah pemindaian selesai dan menghasilkan setidaknya satu baris di `matches` untuk aset dengan perangkat lunak yang diketahui rentan
-- [ ] `/findings` menampilkan temuan hasil pemindaian dengan severity dan (jika berlaku) tanda KEV
-- [ ] Grafik dirender di `/charts` tanpa error 500
-- [ ] Risk engine — skor risiko suatu temuan bernilai bukan nol dan mencerminkan CVSS/kritikalitas/KEV/EPSS sesuai ekspektasi
-- [ ] Scheduler aktif — `risk_snapshots` mendapatkan baris baru setelah waktu terjadwal berlalu, atau segera saat startup bot (`bot/main.py` mencatat snapshot langsung saat diluncurkan)
-- [ ] Laporan — `/generate_report/<type>` menghasilkan PDF yang dapat diunduh di `/download/<report_id>`
-- [ ] Bot Telegram merespons `/start`, `/help`, dan `/status` (jika dikonfigurasi)
-- [ ] Alert — pemindaian dengan temuan baru mengirimkan pesan Telegram ke `CHAT_ID` (jika dikonfigurasi)
-- [ ] Chat AI merespons pertanyaan dengan konten yang berbasis data aktual Anda, bukan jawaban generik (jika `LLM_URL` dikonfigurasi)
-- [ ] Memori percakapan — mengajukan pertanyaan lanjutan dalam percakapan yang sama mencerminkan konteks sebelumnya (jika AI dikonfigurasi)
-- [ ] Analisis CVE AI — setelah menambahkan aset dengan CVE yang diketahui, baris `cve_ai_analysis` berpindah dari `pending` ke `done` dalam beberapa siklus scheduler (jika AI dikonfigurasi)
-
----
-
-## 16. Memperbarui ARGUS
-
-```bash
-# 1. Backup terlebih dahulu — lihat §17
-# 2. Hentikan proses dashboard dan bot
-# 3. Tarik (pull) kode terbaru
-git pull
-
-# 4. Aktifkan virtual environment Anda dan perbarui dependensi
-source venv/bin/activate
-pip install -r requirements.txt --upgrade
-
-# 5. Terapkan migrasi skema baru apa pun
-cd bot
-python migrate.py
-cd ..
-
-# 6. Tinjau .env terhadap referensi variabel terkini di §7 untuk variabel baru apa pun
-# 7. Mulai ulang (restart) dashboard dan, jika digunakan, bot
-python app.py
-```
-
-**Mengapa urutan ini:** dependensi harus mutakhir sebelum kode aplikasi yang bergantung padanya berjalan; migrasi skema harus diterapkan sebelum aplikasi mulai melayani permintaan terhadap basis data yang diasumsikannya sudah mutakhir (baik `app.py` maupun `bot/main.py` juga menerapkan migrasi sendiri saat startup, sehingga langkah 5 adalah langkah pengaman tambahan alih-alih benar-benar wajib, tetapi menjalankannya secara eksplisit memunculkan error migrasi sebelum trafik dari pengguna mengenai aplikasi).
-
-**Pembaruan model AI.** Jika Anda memperbarui server LLM lokal Anda atau mengganti model, tidak ada migrasi di sisi ARGUS yang dibutuhkan — `LLM_URL` dan konfigurasi model itu sendiri independen dari skema basis data ARGUS. Jalankan ulang uji konektivitas di [§8](#8-instalasi-ai) setelah perubahan apa pun pada server model.
-
-**Rollback.** Jika sebuah pembaruan memunculkan regresi: hentikan proses yang terpengaruh, pulihkan kode versi sebelum pembaruan (`git checkout <tag-atau-commit-sebelumnya>`), pasang ulang `requirements.txt` versi tersebut, dan — jika pembaruan tersebut menyertakan migrasi skema yang perlu Anda batalkan — pulihkan basis data dari backup yang diambil pada langkah 1, karena ARGUS tidak menyediakan down-migration otomatis (lihat [§6](#6-inisialisasi-basis-data)).
-
----
-
-## 17. Backup & Restore
-
-### Apa yang perlu di-backup
-
-| Item | Lokasi | Metode backup |
-|---|---|---|
-| Basis data (seluruh data aplikasi — aset, temuan, CVE, metadata laporan, pengguna, percakapan AI, cache AI) | PostgreSQL (`argus_db`) | `pg_dump` |
-| Laporan PDF yang dihasilkan | `bot/dashboard/generated_reports/` | Salinan tingkat file |
-| Konfigurasi / variabel environment | `.env` | Salinan tingkat file, disimpan secara aman (berisi rahasia/secret) |
-| Riwayat percakapan AI | Termasuk dalam basis data (`ai_conversations`, `ai_messages`) | Sudah tercakup oleh `pg_dump` di atas — tidak perlu langkah terpisah |
-| Cache respons AI | Termasuk dalam basis data (`ai_response_cache`) | Sudah tercakup oleh `pg_dump` di atas; bernilai rendah untuk dipulihkan karena entrinya ber-TTL pendek, tetapi tersertakan secara default dalam dump lengkap |
-
-### Backup basis data
-
-```bash
-pg_dump -U argus_user -h localhost -d argus_db -F c -f argus_backup.dump
-```
-
-Format khusus (custom) `-F c` mendukung restore selektif dan paralel; gunakan SQL biasa (`-F p`) jika Anda menginginkan file dump yang dapat dibaca/disunting manusia.
-
-### Restore basis data
-
-```bash
-# Ke dalam basis data baru yang kosong:
-createdb -U postgres -O argus_user argus_db_restored
-pg_restore -U argus_user -h localhost -d argus_db_restored argus_backup.dump
-```
-
-Arahkan `DB_NAME` ke nama basis data hasil restore setelah Anda memverifikasinya, atau restore langsung menimpa nama basis data asli jika menggantinya sepenuhnya (dalam kasus ini, drop dan buat ulang basis data terlebih dahulu).
-
-### Prosedur restore lengkap
-
-1. Hentikan proses dashboard dan bot.
-2. Pulihkan basis data seperti ditunjukkan di atas.
-3. Pulihkan `bot/dashboard/generated_reports/` dari backup tingkat file Anda, jika riwayat laporan penting bagi Anda.
-4. Pulihkan `.env` dari backup aman Anda (atau buat ulang — lihat [§7](#7-konfigurasi-environment)).
-5. Mulai dashboard, pastikan login dan data sesuai ekspektasi, lalu mulai bot jika digunakan.
-6. Jalankan [Daftar Periksa Verifikasi](#15-daftar-periksa-verifikasi).
-
-### Rekomendasi pemulihan bencana (disaster recovery)
-
-- Otomatisasi `pg_dump` pada jadwal (cron/Task Scheduler) yang terpisah dari scheduler internal ARGUS sendiri, dan simpan dump di luar host yang menjalankan PostgreSQL.
-- Perlakukan `.env` sebagai rahasia yang membutuhkan perlindungan yang sama seperti entri password vault — backup file ini, tetapi jangan bersamaan dengan backup aplikasi yang tidak terenkripsi.
-- Uji prosedur restore Anda secara berkala alih-alih mengasumsikan file backup valid; dry run `pg_restore` terhadap basis data scratch adalah asuransi berbiaya rendah.
-
----
-
-## 18. Pemecahan Masalah
-
-| Gejala | Kemungkinan Penyebab | Resolusi | Verifikasi |
-|---|---|---|---|
-| Aplikasi gagal dijalankan: `RuntimeError: SECRET_KEY is missing` | `.env` tidak ada, tidak dimuat, atau tidak memiliki `SECRET_KEY` | Setel `SECRET_KEY` di `.env`; pastikan Anda menjalankan `python app.py` dari direktori yang berisi `.env` | Restart; error seharusnya tidak berulang |
-| Aplikasi gagal dijalankan: `ADMIN_PASSWORD and VIEWER_PASSWORD must be set` | Kredensial bawaan tidak diset | Setel keduanya di `.env` | Restart; halaman login dimuat |
-| `psycopg2.OperationalError: could not connect to server` | PostgreSQL tidak berjalan, host/port salah, atau firewall memblokir | Pastikan PostgreSQL berjalan (`systemctl status postgresql` / panel Services di Windows); verifikasi `DB_HOST`/`DB_PORT` | `psql -U argus_user -d argus_db -h $DB_HOST -p $DB_PORT` berhasil |
-| `psycopg2.OperationalError: FATAL: password authentication failed` | `DB_PASSWORD` salah, atau ketidakcocokan metode autentikasi `pg_hba.conf` | Reset password dengan `ALTER USER argus_user WITH PASSWORD '...'`; periksa `pg_hba.conf` menggunakan `md5`/`scram-sha-256` untuk jenis koneksi yang digunakan | Uji `psql` yang sama seperti di atas |
-| `/api/chat` mengembalikan "ARGUS AI is not configured" | `LLM_URL` tidak diset | Setel `LLM_URL` ke endpoint yang kompatibel dengan OpenAI yang sedang berjalan | Uji `curl` dari [§8](#8-instalasi-ai) berhasil, lalu coba lagi endpoint chat |
-| Permintaan chat/analisis AI mengalami timeout | Server LLM kelebihan beban, model terlalu besar untuk perangkat keras yang tersedia, atau server sebenarnya tidak berjalan | Pastikan server merespons uji `curl` di [§8](#8-instalasi-ai) dalam waktu yang wajar; pertimbangkan model yang lebih kecil/lebih terkuantisasi atau akselerasi GPU | Ulangi uji `curl`; periksa log server LLM itu sendiri |
-| "Model not found" dari server LLM | Model belum ditarik/diunduh, atau nama model yang dikonfigurasi di server salah | Jalankan ulang langkah pull/unduh model untuk server pilihan Anda (Ollama: `ollama pull <model>`; llama.cpp: pastikan path `-m` benar) | Perintah daftar model di sisi server berhasil |
-| Pemindaian gagal atau tidak mengembalikan hasil untuk perangkat lunak yang diketahui rentan | NVD API tidak terjangkau, kena rate limit, atau string vendor/produk/versi tidak cocok dengan penamaan CPE milik NVD | Verifikasi konektivitas NVD sesuai [§9](#9-konfigurasi-api-eksternal); tambahkan `NVD_API_KEY` jika terkena rate limit; periksa ejaan vendor/produk terhadap UI pencarian NVD sendiri | `curl` langsung ke NVD API berhasil; pemindaian yang dijalankan ulang secara manual menghasilkan kecocokan yang diharapkan |
-| Bot Telegram tidak merespons | `TOKEN` tidak valid/tidak ada, bot belum dimulai dengan `/start`, egress jaringan diblokir ke API Telegram | Verifikasi ulang `TOKEN`; kirim `/start` terlebih dahulu; pastikan HTTPS keluar ke `api.telegram.org` diizinkan | Bot membalas `/start` |
-| Job scheduler tidak pernah berjalan | `RUN_SCHEDULER=false` pada setiap proses, atau proses terus crash/restart sebelum mencapai waktu terjadwal | Pastikan setidaknya satu proses memiliki `RUN_SCHEDULER` tidak diset atau `true`; periksa uptime proses/log untuk crash loop | Tabel `risk_snapshots` mendapatkan baris baru pada waktu yang diharapkan |
-| Job scheduler berjalan dua kali | Baik `app.py` maupun `bot/main.py` berjalan dengan scheduler aktif pada keduanya | Setel `RUN_SCHEDULER=false` pada salah satu proses | Volume laporan/alert ganda berhenti setelah restart |
-| `Permission denied` saat menulis ke `generated_reports/` atau `logs/` | Izin filesystem tidak mengizinkan user yang menjalankan proses untuk menulis | `chmod`/`chown` direktori dengan tepat di Linux, atau sesuaikan izin folder di tab Security Windows Explorer | Pembuatan laporan berhasil |
-| `Address already in use` / konflik port pada `5000` | Proses lain sudah terikat ke port 5000 | Hentikan proses yang berkonflik, atau jalankan di balik Gunicorn pada port berbeda (lihat [§23](#23-deployment-produksi)) dan sesuaikan reverse proxy Anda | `python app.py` dimulai tanpa error bind |
-| `pip install` gagal mengompilasi paket dari sumber kode | Tidak ada wheel prebuilt untuk kombinasi Python/OS/arsitektur Anda yang spesifik, build tools tidak ada | Pasang toolchain compiler (`build-essential` di Debian/Ubuntu, Xcode Command Line Tools di macOS, Visual Studio Build Tools di Windows) dan header dev client PostgreSQL (`libpq-dev` di Debian/Ubuntu) | `pip install -r requirements.txt` selesai |
-| `bot/migrate.py` melaporkan `FAILED` untuk migrasi tertentu | Perubahan skema manual yang berkonflik, atau hak akses basis data tidak cukup | Baca error yang dicetak di bawah langkah yang gagal; berikan hak akses yang hilang atau selesaikan konflik objek secara manual, lalu jalankan ulang | Menjalankan ulang `python migrate.py` menunjukkan `OK` untuk langkah tersebut |
-| Pembuatan laporan gagal/hang | `matplotlib`/`reportlab` kehilangan font atau dependensi sistem, atau jumlah temuan yang sangat besar menyebabkan rendering lambat | Periksa log aplikasi di sekitar waktu kegagalan untuk exception yang mendasarinya; untuk laporan yang sangat besar, pertimbangkan mempersempit cakupan tanggal/aset laporan jika filter semacam itu tersedia di versi Anda | Jalankan ulang pembuatan laporan; periksa `generated_reports/` untuk file output |
-| Penggunaan memori tinggi / OOM pada server LLM | Model terlalu besar untuk RAM/VRAM yang tersedia | Beralih ke model yang lebih kecil atau kuantisasi yang lebih agresif (lihat [§8](#8-instalasi-ai)) | Server model dimulai dan merespons tanpa dimatikan paksa oleh OS |
-| Windows: path dengan backslash menyebabkan error pada skrip yang disalin dari contoh Linux | Perbedaan sintaks shell, bukan bug ARGUS | Gunakan varian perintah khusus Windows yang ditunjukkan dalam panduan ini (PowerShell/Command Prompt), bukan sintaks `bash` Linux secara verbatim | Perintah selesai tanpa error parsing path |
-| Linux: `Permission denied` saat menjalankan `python main.py` setelah clone | Kepemilikan file/skrip dari `git clone` yang dijalankan sebagai user berbeda, atau `venv` dibuat oleh root | Pastikan virtual environment dan direktori proyek dimiliki oleh user yang menjalankan ARGUS: `chown -R $USER:$USER argus/` | Perintah berjalan tanpa `Permission denied` |
-
----
-
-## 19. Logging
-
-**Tujuan log (destination).** ARGUS saat ini tidak menulis log ke file secara default. `bot/main.py` mengonfigurasi `logging.basicConfig(...)` dengan format berstempel waktu pada level `INFO`, yang — tanpa file handler eksplisit — mengirimkan output ke konsol (stderr) tempat proses dimulai. `app.py` menggunakan `logging.getLogger(__name__)` tingkat modul tanpa pemanggilan `basicConfig`-nya sendiri, sehingga level log dan handler efektifnya mengikuti perilaku logging default Python/Flask kecuali Anda mengonfigurasi logging secara eksplisit pada tingkat proses/supervisor.
-
-**Direktori `logs/`** ada dalam repositori dan dikecualikan dari version control melalui `.gitignore`, tetapi tidak ada apa pun dalam basis kode saat ini yang menulis ke direktori tersebut secara otomatis — perlakukan direktori ini sebagai cadangan untuk konfigurasi logging Anda sendiri (misalnya, mengalihkan stdout ke sana) alih-alih sebagai sink log aktif secara out-of-the-box.
-
-**Level log.** Proses bot defaultnya `INFO`. Saat ini tidak ada variabel environment `LOG_LEVEL` yang dibaca oleh basis kode — untuk mengubah verbositas, sunting pemanggilan `logging.basicConfig(level=...)` di `bot/main.py`, atau konfigurasikan logging secara eksternal (misalnya, `logging.conf` yang dimuat oleh supervisor proses Anda, atau menangkap stdout melalui logging milik Gunicorn/systemd sendiri).
-
-**Mode debug.** Jalur run-langsung `app.py` di-hardcode ke `debug=False`. Jangan mengubah ini pada lingkungan bersama atau produksi apa pun.
-
-**Melihat log di produksi.** Jika Anda mengikuti deployment systemd di [§23](#23-deployment-produksi), gunakan `journalctl -u argus -f` untuk mengikuti (tail) log. Jika Anda menangkap stdout ke file melalui supervisor proses Anda, gunakan `tail -f` pada file tersebut.
-
-**Rotasi log.** Karena ARGUS tidak mengelola file log-nya sendiri, gunakan rotasi log milik supervisor proses atau OS Anda (`logrotate` di Linux untuk file stdout yang dialihkan, atau pengaturan retensi systemd/journald sendiri) alih-alih mengharapkan ARGUS merotasi apa pun sendiri.
-
-**Informasi sensitif.** Log aplikasi dapat menyertakan detail error (misalnya, pernyataan SQL yang gagal atau isi error HTTP) yang mungkin mereferensikan identifier internal. Log-log tersebut seharusnya tidak menyertakan password mentah atau nilai `SECRET_KEY`/`TOKEN` berdasarkan titik pemanggilan logging yang ditinjau saat ini, tetapi perlakukan semua log aplikasi sebagai internal-only alih-alih aman untuk dibagikan secara sembarangan, karena konten log dapat berubah seiring evolusi basis kode.
-
----
-
-## 20. Rekomendasi Keamanan
-
-- **Lindungi `.env`.** Izin file harus membatasi akses baca hanya untuk akun user yang menjalankan ARGUS (`chmod 600 .env` di Linux). Jangan pernah meng-commit file ini; `.gitignore` sudah mengecualikannya.
-- **Gunakan HTTPS pada deployment apa pun yang dapat dijangkau melalui jaringan yang tidak sepenuhnya Anda kendalikan.** Terminasi TLS pada reverse proxy (lihat [§23](#23-deployment-produksi)) dan pertahankan `SESSION_COOKIE_SECURE=true`.
-- **Ubah kredensial default segera.** `ADMIN_PASSWORD` dan `VIEWER_PASSWORD` tidak memiliki default bawaan, tetapi pilih nilai yang kuat dan unik alih-alih sesuatu yang mudah ditebak — kedua akun ini adalah satu-satunya yang ada sebelum registrasi mandiri (self-registration) terjadi.
-- **Hak akses basis data.** Gunakan `argus_user` khusus (seperti dibuat di [§5](#5-instalasi-postgresql)) alih-alih terhubung sebagai superuser PostgreSQL; berikan hanya hak akses yang dibutuhkannya pada `argus_db`.
-- **Konfigurasi firewall.** Batasi akses masuk (inbound) ke port PostgreSQL (5432) hanya untuk host yang menjalankan ARGUS. Batasi akses masuk ke port dashboard hanya untuk reverse proxy Anda, bukan internet publik secara langsung.
-- **Reverse proxy.** Tempatkan nginx atau Caddy di depan Gunicorn alih-alih mengekspos dev server Flask atau Gunicorn secara langsung ke jaringan yang tidak tepercaya (lihat [§23](#23-deployment-produksi)).
-- **Least privilege (hak akses minimum).** Gunakan peran `viewer` untuk siapa pun yang tidak perlu mengubah aset atau temuan; cadangkan `admin` untuk mereka yang membutuhkannya.
-- **Izin file.** Pastikan `generated_reports/` dan direktori data basis data tidak dapat dibaca oleh semua orang (world-readable), karena laporan dan basis data dapat berisi detail aset internal.
-- **Manajemen rahasia (secrets management).** Untuk apa pun di luar deployment lab operator tunggal, pertimbangkan secrets manager (misalnya milik penyedia cloud Anda, atau HashiCorp Vault) untuk menyuntikkan nilai `.env` saat proses dimulai alih-alih menyimpannya dalam file plaintext dalam jangka panjang.
-- **Pembaruan rutin.** Jaga PostgreSQL, Python, dan dependensi yang dikunci milik ARGUS tetap mutakhir — jalankan ulang `pip list --outdated` secara berkala di dalam virtual environment Anda dan tinjau changelog sebelum memperbarui, terutama untuk `Flask`, `Flask-Login`, dan `Flask-WTF`, yang relevan dengan keamanan.
-- **Rekomendasi deployment produksi, singkatnya:** akun layanan non-root khusus, Gunicorn dengan tepat satu worker (lihat [§23](#23-deployment-produksi) untuk alasannya), reverse proxy dengan HTTPS, basis data yang difirewall, izin `.env` yang dikunci, dan backup rutin sesuai [§17](#17-backup--restore).
-
----
-
-## 21. Rekomendasi Performa
-
-- **Pengaturan PostgreSQL.** Untuk apa pun di luar instalasi lab kecil, tuning `shared_buffers` (kira-kira 25% dari RAM yang tersedia pada host basis data khusus), `effective_cache_size` (kira-kira 50–75% dari RAM yang tersedia), dan `work_mem` berdasarkan beban query konkuren. Gunakan dokumentasi tuning PostgreSQL sendiri sebagai acuan di sini — ARGUS tidak membutuhkan pengaturan non-standar.
-- **Connection pooling.** ARGUS sudah mengimplementasikan connection pooling internal (`bot/database/db.py`, sebuah `ThreadedConnectionPool`) alih-alih membuka koneksi mentah per query — `DB_POOL_MIN_CONN`/`DB_POOL_MAX_CONN` mengontrol ukurannya. Naikkan `DB_POOL_MAX_CONN` jika Anda menjalankan banyak pengguna dashboard konkuren dan melihat kontensi koneksi, tetapi tetap di bawah pengaturan `max_connections` PostgreSQL sendiri (default 100) di seluruh proses ARGUS gabungan.
-- **Pemilihan model AI.** Model yang lebih kecil/lebih terkuantisasi merespons lebih cepat dan biasanya sudah cukup untuk analisis terstruktur berbasis konteks yang dilakukan ARGUS (lihat [§10 Kemampuan AI di README.md](./README.md#10-kemampuan-ai)); cadangkan model yang lebih besar untuk kasus-kasus di mana Anda telah mengamati kesenjangan kualitas nyata, bukan sebagai default.
-- **Pagination.** Dashboard sudah melakukan pagination pada tampilan daftar temuan dan aset — hindari menonaktifkan atau melewati ini jika Anda menyesuaikan template, karena merender tabel penuh tanpa pagination terhadap tabel `matches` yang besar akan lambat.
-- **Job latar belakang.** Pemindaian, laporan, dan analisis AI sudah berjalan melalui APScheduler alih-alih memblokir penanganan permintaan — hindari memicu operasi besar sesuai permintaan (misalnya, pemindaian manual seluruh inventaris) selama jam puncak penggunaan dashboard jika jumlah aset Anda besar.
-- **Pembuatan laporan.** Biaya pembuatan PDF berskala sesuai jumlah temuan yang disertakan; laporan mingguan/bulanan terjadwal mengamortisasi biaya ini di luar jam sibuk (07:00) alih-alih selama penggunaan tipikal.
-- **Caching.** Cache respons chat AI menghindari panggilan LLM yang redundan untuk pertanyaan berulang terhadap data yang tidak berubah; biarkan job pembersihan cache (setiap 30 menit) tetap berjalan alih-alih menonaktifkannya, sehingga cache tidak tumbuh tanpa batas.
-- **Perangkat keras.** Lihat [§1 Persyaratan Sistem](#1-persyaratan-sistem) untuk panduan ukuran berdasarkan skala deployment.
-
----
-
-## 22. Instalasi Docker (Dukungan Masa Depan)
-
-> **Status: Direncanakan.** ARGUS saat ini tidak menyertakan `Dockerfile` atau `docker-compose.yml` — direktori `docker/` dalam repositori adalah placeholder. Bagian di bawah ini menjelaskan model deployment terkontainerisasi masa depan yang dituju sehingga operator dapat merencanakannya; tidak ada satu pun perintah di bawah ini yang akan berfungsi sampai ini diimplementasikan.
-
-**Arsitektur yang direncanakan.** Sebuah tumpukan Compose multi-container dengan:
-- Sebuah layanan `postgres` menggunakan image resmi PostgreSQL, dengan volume bernama untuk persistensi data.
-- Sebuah layanan `argus-dashboard` yang dibangun dari `Dockerfile` di root proyek, menjalankan `app.py` di balik Gunicorn.
-- Sebuah layanan `argus-bot` opsional yang menjalankan `bot/main.py`, berbagi image yang sama tetapi entrypoint yang berbeda.
-- Sebuah layanan `llm` opsional (misalnya, image server `llama.cpp`) untuk fungsionalitas AI yang sepenuhnya self-contained.
-
-**Volume yang direncanakan.**
-- `postgres_data` — direktori data PostgreSQL.
-- `argus_reports` — dipetakan ke `bot/dashboard/generated_reports/`, sehingga PDF yang dihasilkan bertahan melewati pembuatan ulang container.
-- `argus_env` atau direktif `env_file` Compose — untuk `.env`, alih-alih menyematkan rahasia ke dalam image.
-
-**Jaringan yang direncanakan.** Sebuah jaringan Compose internal sehingga `argus-dashboard`/`argus-bot` menjangkau `postgres` dan `llm` berdasarkan nama layanan (misalnya, `DB_HOST=postgres`) tanpa mengekspos port basis data ke host sama sekali.
-
-**Penanganan variabel environment yang direncanakan.** Variabel yang sama seperti didokumentasikan di [§7](#7-konfigurasi-environment) akan diteruskan melalui direktif `env_file:` atau `environment:` Compose — tidak ada variabel khusus Docker baru yang direncanakan di luar substitusi jaringan Compose standar (misalnya, `DB_HOST=postgres` alih-alih `localhost`).
-
-**Sampai ini terwujud,** deploy ARGUS menggunakan pendekatan virtual environment dalam panduan ini, secara opsional di bawah supervisor proses seperti dijelaskan di [§23](#23-deployment-produksi). Ikuti bagian Peta Jalan pada `README.md` untuk status terkini.
-
----
-
-## 23. Deployment Produksi
-
-### Gunicorn
-
-Pasang Gunicorn ke dalam virtual environment Anda (tidak ada di `requirements.txt`, karena ini adalah pilihan deployment, bukan dependensi aplikasi):
+Pasang Gunicorn (bukan bagian dari `requirements.txt` ARGUS sendiri — ini pilihan deployment yang Anda tambahkan):
 
 ```bash
 pip install gunicorn
 ```
 
-Jalankan dengan **tepat satu worker**:
+Jalankan dengan tepat satu worker:
 
 ```bash
+cd bot/dashboard
 gunicorn -w 1 -b 127.0.0.1:5000 app:app
 ```
 
-**Mengapa harus tepat satu worker.** `app.py` melakukan migrasi skema dan memulai scheduler latar belakang pada saat modul di-import. Model worker default Gunicorn meng-import modul aplikasi satu kali per proses worker — menjalankan banyak worker akan menjalankan migrasi skema dan memulai scheduler (pemindaian harian, laporan, analisis AI) satu kali per worker, menggandakan setiap job terjadwal. Tetap gunakan satu worker sampai basis kode direfaktor ke pola application-factory yang memisahkan efek samping saat import dari penanganan permintaan.
+**Contoh unit systemd** (`/etc/systemd/system/argus.service`):
 
-Jika Anda membutuhkan konkurensi penanganan permintaan lebih dari yang disediakan satu worker Gunicorn, skalakan melalui flag `--threads` milik Gunicorn (beberapa thread dalam satu worker) alih-alih menambah proses worker, atau jalankan bot (`bot/main.py`) sebagai proses yang sepenuhnya terpisah dengan `RUN_SCHEDULER=false` sehingga hanya worker tunggal dashboard yang memiliki penjadwalan.
+```ini
+[Unit]
+Description=ARGUS Vulnerability Management Dashboard
+After=network.target postgresql.service
 
-### Reverse proxy (contoh nginx)
+[Service]
+Type=simple
+User=argus
+WorkingDirectory=/opt/argus/bot/dashboard
+Environment="PATH=/opt/argus/venv/bin"
+ExecStart=/opt/argus/venv/bin/gunicorn -w 1 -b 127.0.0.1:5000 app:app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now argus
+```
+
+**Contoh reverse proxy Nginx:**
 
 ```nginx
 server {
@@ -824,134 +1582,277 @@ server {
 }
 ```
 
-### Sertifikat SSL
+Gunakan [Certbot](https://certbot.eff.org/) untuk sertifikat HTTPS gratis yang diperbarui otomatis.
 
-Gunakan [Certbot](https://certbot.eff.org/) untuk sertifikat Let's Encrypt gratis yang diperbarui otomatis, atau proses penerbitan sertifikat organisasi Anda yang sudah ada untuk deployment internal.
+**Penting:** Flag keamanan cookie sesi ARGUS (`SESSION_COOKIE_SECURE`) **di-hardcode ke `False` dalam kode sumber** (`bot/dashboard/app.py`), tidak dibaca dari variabel environment. Jika Anda men-deploy di belakang HTTPS seperti ditunjukkan di atas, nilai ini seharusnya diubah menjadi `True` langsung di kode sumber sebelum penggunaan produksi — saat ini tidak ada pengaturan `.env` untuk ini (lihat daftar variabel otoritatif di [§13](#13-konfigurasi-environment), yang tidak menyertakannya).
 
-### Layanan systemd (Linux)
+### Firewall
 
-```ini
-# /etc/systemd/system/argus.service
-[Unit]
-Description=ARGUS Vulnerability Management Dashboard
-After=network.target postgresql.service
+- Batasi akses masuk (inbound) ke port PostgreSQL (5432) hanya untuk host aplikasi ARGUS — jangan pernah mengeksposnya ke internet publik.
+- Batasi akses masuk ke port 5000 (port listening dashboard yang sebenarnya) hanya untuk reverse proxy; reverse proxy itulah yang benar-benar dijangkau publik/jaringan Anda.
 
-[Service]
-Type=simple
-User=argus
-WorkingDirectory=/opt/argus
-Environment="PATH=/opt/argus/venv/bin"
-ExecStart=/opt/argus/venv/bin/gunicorn -w 1 -b 127.0.0.1:5000 app:app
-Restart=on-failure
-RestartSec=5
+### Basis data, Telegram, server AI, dan scheduler di produksi
 
-[Install]
-WantedBy=multi-user.target
-```
+- Jalankan PostgreSQL di host khusus yang di-backup untuk apa pun di luar deployment operator-tunggal.
+- Jalankan bot Telegram sebagai layanan systemd-nya sendiri, terpisah dari dashboard, dengan `RUN_SCHEDULER=false` pada mana pun dari keduanya yang Anda tetapkan sebagai proses non-scheduling.
+- Jika menggunakan AI, jalankan server LLM di mesin yang hanya dapat dijangkau dari jaringan internal Anda, bukan internet publik — client AI ARGUS tidak menambahkan autentikasi atau TLS-nya sendiri ke koneksi tersebut.
+
+### Health check
+
+ARGUS saat ini tidak mengekspos endpoint `/health` khusus. Ekuivalen praktis:
+
+- Perintah `/status` milik bot Telegram melakukan pemeriksaan konektivitas basis data + NVD sungguhan.
+- Memonitor `GET /login` untuk respons HTTP `200` adalah pemeriksaan liveness dasar yang masuk akal untuk dashboard.
+- Monitor PostgreSQL itu sendiri, dan server LLM (jika digunakan), secara independen — ARGUS tidak mengagregasi kesehatannya ke dalam statusnya sendiri.
+
+### Backup dan monitoring
+
+Lihat [§19 Backup](#19-backup). Untuk monitoring, ARGUS sendiri saat ini tidak menyertakan metrik Prometheus atau instrumentasi serupa (**Fitur Direncanakan** paling banter, belum diimplementasikan) — gunakan alat eksternal standar (view statistik PostgreSQL sendiri, systemd/journald untuk kesehatan proses, pemeriksa uptime untuk dashboard).
+
+**Lanjutkan ke [§19 Backup](#19-backup).**
+
+---
+
+## 19. Backup
+
+### Tujuan
+
+Melindungi terhadap kehilangan data.
+
+### Backup basis data
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now argus
-sudo systemctl status argus
+pg_dump -U postgres -d argus_db -F c -f argus_backup.dump
 ```
 
-Buat unit yang setara untuk `bot/main.py` jika menjalankan bot Telegram sebagai layanan, setel `RUN_SCHEDULER=false` pada blok `Environment=`-nya jika layanan dashboard sudah memiliki penjadwalan.
+Format custom (`-F c`) mendukung restore selektif dan paralel. Gunakan `-F p` sebagai gantinya jika Anda menginginkan file SQL biasa yang dapat dibaca manusia.
 
-### Restart otomatis
+### Backup konfigurasi
 
-Unit systemd di atas (`Restart=on-failure`) me-restart proses secara otomatis saat crash. Gabungkan dengan `RestartSec` untuk menghindari tight crash-restart loop yang menghabiskan sumber daya jika kegagalan yang mendasarinya bersifat persisten (misalnya, basis data tidak terjangkau).
+Backup `.env` **secara terpisah** dari dump basis data, dan dengan kontrol akses yang berbeda (lebih ketat), karena berisi rahasia teks polos.
 
-### Rotasi log
+### Backup laporan
 
-Lihat [§19 Logging](#19-logging) — karena ARGUS mencatat log ke stdout secara default, journal systemd menangani retensi (`journalctl` dengan `SystemMaxUse=` di `journald.conf`), atau alihkan ke file dan kelola dengan `logrotate`.
+Laporan PDF yang dihasilkan berada di filesystem pada `bot/dashboard/generated_reports/`, **bukan** di dalam basis data — backup basis-data-saja tidak menangkapnya. Backup folder ini secara terpisah jika file laporan historis penting bagi Anda.
 
-### Monitoring dan health check
+### Backup riwayat percakapan
 
-Tidak ada endpoint `/health` khusus yang terpisah dari rute-rute dashboard sendiri dalam basis kode saat ini; gunakan perintah `/status` milik bot Telegram (yang melakukan pemeriksaan basis data dan NVD API sungguhan) sebagai sinyal kesehatan fungsional jika bot sedang berjalan, atau pantau halaman `/login` dashboard untuk respons `200` sebagai pemeriksaan liveness dasar, dikombinasikan dengan memantau PostgreSQL dan server LLM Anda (jika digunakan) secara independen.
+Riwayat percakapan AI (`ai_conversations`/`ai_messages`) sepenuhnya berada di dalam PostgreSQL — `pg_dump` standar sudah mencakupnya sepenuhnya; tidak ada langkah terpisah yang dibutuhkan.
 
-### Backup
+### Pemulihan (prosedur restore)
 
-Otomatisasi prosedur `pg_dump` di [§17](#17-backup--restore) pada jadwal yang independen dari ARGUS itu sendiri (cron/systemd timer), dan verifikasi backup secara berkala.
+```bash
+# Ke dalam basis data baru yang kosong:
+createdb -U postgres -O postgres argus_db_restored
+pg_restore -U postgres -d argus_db_restored argus_backup.dump
+```
 
----
+Verifikasi basis data yang dipulihkan, lalu baik arahkan `DB_NAME` ke sana atau ganti namanya menjadi `argus_db` setelah Anda yakin itu benar.
 
-## 24. Uninstalasi
+### Verifikasi
 
-1. **Hentikan layanan.**
-   ```bash
-   sudo systemctl stop argus       # jika menggunakan systemd
-   sudo systemctl disable argus
-   ```
-   Atau, jika dijalankan secara manual, hentikan proses `app.py`/`main.py` (Ctrl+C, atau kill proses jika berjalan di background).
+Setelah restore apa pun, jalankan ulang seluruh daftar periksa [§16 Verifikasi Instalasi](#16-verifikasi-instalasi) terhadap basis data yang dipulihkan sebelum mengandalkannya.
 
-2. **Hapus environment Python.**
-   ```bash
-   rm -rf venv/
-   ```
+### Praktik terbaik
 
-3. **Hapus basis data** (tidak dapat dibatalkan — backup terlebih dahulu jika ada kemungkinan Anda akan membutuhkan data tersebut nanti):
-   ```sql
-   DROP DATABASE argus_db;
-   DROP USER argus_user;
-   ```
+- Otomatisasi `pg_dump` pada jadwal (cron atau systemd timer) independen dari scheduler internal ARGUS sendiri.
+- Simpan backup di luar mesin yang menjalankan PostgreSQL.
+- Uji restore sesungguhnya secara berkala — backup yang tidak diuji bukan backup yang terverifikasi.
 
-4. **Hapus laporan yang dihasilkan.**
-   ```bash
-   rm -rf bot/dashboard/generated_reports/*
-   ```
-
-5. **Bersihkan cache respons AI dan data percakapan.** Sudah tercakup dengan menghapus basis data pada langkah 3; tidak ada file cache terpisah yang ada di luar PostgreSQL.
-
-6. **Hapus model AI (opsional)** — hanya relevan jika Anda memasang server LLM lokal khusus untuk ARGUS dan tidak membutuhkannya untuk hal lain:
-   ```bash
-   # llama.cpp — cukup hapus file .gguf yang diunduh
-   rm /path/to/model.gguf
-
-   # Ollama
-   ollama rm <model-name>
-   ```
-
-7. **Pembersihan lengkap.**
-   ```bash
-   cd .. && rm -rf argus/
-   ```
-   Hapus file unit systemd apa pun yang dibuat di [§23](#23-deployment-produksi):
-   ```bash
-   sudo rm /etc/systemd/system/argus.service
-   sudo systemctl daemon-reload
-   ```
+**Lanjutkan ke [§20 Memperbarui ARGUS](#20-memperbarui-argus).**
 
 ---
 
-## 25. Pertanyaan yang Sering Diajukan
+## 20. Memperbarui ARGUS
 
-**Bisakah ARGUS berjalan sepenuhnya offline?** Fungsionalitas inti aset/temuan/risiko/dashboard/pelaporan hanya membutuhkan akses jaringan untuk data NVD, KEV, dan EPSS selama pemindaian — tidak membutuhkan koneksi jaringan hanya untuk menelusuri data yang sudah ada. Fitur AI membutuhkan akses ke `LLM_URL` yang dikonfigurasi, tetapi jika endpoint tersebut adalah server lokal pada mesin atau LAN yang sama, tidak dibutuhkan akses internet untuk AI juga.
+### Tujuan
 
-**Bisakah saya menggunakan LLM yang di-hosting di cloud alih-alih yang lokal?** Ya, secara fungsional — `LLM_URL` menerima endpoint `/v1/chat/completions` yang kompatibel dengan OpenAI mana pun yang dapat dijangkau, termasuk permukaan API kompatibel milik penyedia cloud. Perlu diketahui bahwa ini mengirimkan konteks temuan/aset Anda (apa pun yang dirakit oleh context builder untuk pertanyaan tertentu) ke layanan eksternal tersebut; evaluasi hal ini terhadap persyaratan penanganan data Anda sendiri sebelum melakukannya, karena ARGUS sendiri tidak menyaring atau menyensor konten ini sebelum mengirimkannya.
+Perbarui ARGUS dengan aman tanpa kehilangan data atau merusak instalasi yang ada.
 
-**Bisakah saya menggunakan mesin basis data yang berbeda (misalnya, MySQL)?** Tidak — seluruh lapisan `database/` ditulis berdasarkan `psycopg2` dan SQL khusus PostgreSQL (misalnya, `ON CONFLICT`, `TIMESTAMPTZ`). Mengganti mesin akan membutuhkan penulisan ulang lapisan tersebut; ini bukan opsi konfigurasi yang didukung.
+### Perintah
 
-**Bisakah saya menonaktifkan fitur AI sepenuhnya?** Ya — cukup biarkan `LLM_URL` tidak diset. Endpoint chat mengembalikan pesan eksplisit "belum dikonfigurasi", dan job analisis AI latar belakang tidak memiliki apa pun untuk diproses tanpa LLM yang dapat dijangkau, sehingga efektif idle.
+```bash
+# 1. Backup terlebih dahulu — lihat §19
+# 2. Hentikan proses dashboard dan bot
 
-**Bisakah saya menggunakan SQLite alih-alih PostgreSQL?** Tidak, dengan alasan yang sama seperti di atas — skema dan query bergantung pada fitur khusus PostgreSQL (`SERIAL`, `TIMESTAMPTZ`, `ON CONFLICT`, penanganan JSON/array di beberapa tempat) yang tidak dapat dipetakan langsung ke SQLite.
+# 3. Tarik (pull) kode terbaru
+git pull
 
-**Bisakah beberapa pengguna terhubung ke dashboard secara bersamaan?** Ya — dashboard adalah aplikasi web Flask multi-pengguna standar dengan autentikasi berbasis sesi per-pengguna (`admin`, `viewer`, dan akun mana pun yang mendaftar sendiri). Akses konkuren dibatasi oleh konfigurasi konkurensi server WSGI Anda (lihat [§23](#23-deployment-produksi)) dan ukuran connection pool basis data (lihat [§21](#21-rekomendasi-performa)).
+# 4. Aktifkan virtual environment Anda dan perbarui dependensi
+source venv/bin/activate           # atau ekuivalen Windows
+pip install -r requirements.txt --upgrade
 
-**Berapa banyak RAM yang sebenarnya dibutuhkan?** Untuk ARGUS itu sendiri (dashboard + bot + PostgreSQL) pada skala kecil, 4 GB sudah dapat digunakan. Tambahkan jauh lebih banyak jika Anda juga menjalankan LLM lokal pada host yang sama — lihat [§8](#8-instalasi-ai) untuk panduan ukuran model terhadap RAM.
+# 5. Terapkan ulang schema.sql (aman — setiap pernyataan CREATE TABLE IF NOT EXISTS / idempoten)
+psql -U postgres -d argus_db -f bot/database/schema.sql
 
-**Bisakah saya men-deploy ARGUS di Docker hari ini?** Belum bisa langsung — lihat [§22](#22-instalasi-docker-dukungan-masa-depan). Ini ada dalam peta jalan tetapi belum diimplementasikan dalam basis kode saat ini.
+# 6. Jalankan ulang migrate.py (selalu aman dijalankan ulang; mengambil tabel/kolom baru apa pun)
+cd bot
+python database/migrate.py
+cd ..
 
-**Bisakah saya mengintegrasikan Active Directory / LDAP / SSO?** Belum saat ini — autentikasi terbatas pada akun bawaan `admin`/`viewer` dan akun lokal yang mendaftar sendiri yang tersimpan di tabel `users`. SSO enterprise terdaftar sebagai item peta jalan di `README.md`, bukan kemampuan yang sudah ada.
+# 7. Periksa ulang .env Anda terhadap daftar variabel terkini di §13 untuk hal baru apa pun
+
+# 8. Mulai ulang dashboard dan, jika digunakan, bot
+```
+
+### Mengapa urutan ini
+
+Dependensi harus mutakhir sebelum menjalankan kode apa pun yang bergantung pada fitur paket yang lebih baru. Skema dan migrasi harus diterapkan sebelum aplikasi mulai melayani permintaan terhadap bentuk-basis-data yang diasumsikan-mutakhir — baik `schema.sql` maupun `migrate.py` aman dijalankan ulang terhadap basis data yang sudah mutakhir, karena setiap pernyataan di keduanya ditulis sebagai `IF NOT EXISTS`/idempoten.
+
+### Pembaruan AI
+
+Memperbarui model LLM lokal atau server sepenuhnya independen dari proses pembaruan ARGUS sendiri — tidak ada migrasi sisi-ARGUS yang dibutuhkan. Cukup perbarui instalasi `llama.cpp`/Ollama Anda atau ganti file model, lalu verifikasi ulang konektivitas sesuai [§14](#14-verifikasi-environment).
+
+### Rollback
+
+Jika pembaruan menyebabkan regresi: hentikan proses yang terpengaruh, checkout versi kode terakhir yang diketahui baik (`git checkout <tag-atau-commit-sebelumnya>`), instal ulang `requirements.txt` versi tersebut, dan — jika pembaruan menyertakan perubahan skema yang perlu Anda batalkan — pulihkan basis data dari backup yang diambil di langkah 1, karena ARGUS tidak menyediakan down-migration otomatis ([§11](#11-inisialisasi-skema)).
+
+### Verifikasi
+
+Jalankan ulang [§16 Verifikasi Instalasi](#16-verifikasi-instalasi) setelah setiap pembaruan.
+
+**Lanjutkan ke [§21 Uninstalasi](#21-uninstalasi).**
 
 ---
 
-## 26. Referensi
+## 21. Uninstalasi
 
-- [`README.md`](./README.md) — ringkasan proyek, fitur, arsitektur, dan status proyek saat ini
-- `API.md` — referensi rute/API dashboard (belum dipublikasikan — lihat `README.md` §16 Dokumentasi untuk status terkini)
-- `ARCHITECTURE.md` — dokumentasi arsitektur lanjutan (belum dipublikasikan — lihat `README.md` §5 dan §8 sementara ini)
-- `DATABASE.md` — referensi skema lengkap (belum dipublikasikan — lihat langsung `bot/database/schema.sql` dan `bot/migrate.py`)
-- `AI.md` — referensi desain AI Security Copilot (belum dipublikasikan — lihat `README.md` §10 dan [§8](#8-instalasi-ai)/[§9](#9-konfigurasi-api-eksternal) dokumen ini)
-- `DEPLOYMENT.md` — deployment terkontainerisasi/produksi (belum dipublikasikan — lihat [§22](#22-instalasi-docker-dukungan-masa-depan) dan [§23](#23-deployment-produksi) dokumen ini)
-- `SECURITY.md` — model keamanan dan proses pengungkapan bertanggung jawab (responsible disclosure) (lihat `README.md` §11 dan [§20](#20-rekomendasi-keamanan) dokumen ini)
-- `ROADMAP.md` — fitur yang direncanakan (belum dipublikasikan — lihat `README.md` §17 Peta Jalan)
+### Tujuan
+
+Hapus ARGUS dan semua yang dibuatnya secara bersih dan aman.
+
+### Hentikan semua proses yang berjalan
+
+Hentikan dashboard, bot Telegram, dan (jika dikelola oleh systemd) nonaktifkan layanannya:
+
+```bash
+sudo systemctl stop argus
+sudo systemctl disable argus
+```
+
+### Penghapusan basis data
+
+**Langkah ini tidak dapat dibatalkan — backup terlebih dahulu jika ada kemungkinan Anda akan membutuhkan datanya nanti (lihat [§19](#19-backup)).**
+
+```sql
+DROP DATABASE argus_db;
+```
+
+### Penghapusan pengguna (hanya role khusus, jika Anda membuatnya)
+
+```sql
+DROP ROLE argus_user;
+```
+
+(**Jangan** menghapus role superuser `postgres` — dibutuhkan oleh PostgreSQL itu sendiri.)
+
+### Penghapusan virtual environment
+
+```bash
+rm -rf venv/
+```
+
+### Penghapusan laporan
+
+```bash
+rm -rf bot/dashboard/generated_reports/*
+```
+
+### Penghapusan model AI (hanya jika Anda menginstal server LLM lokal khusus untuk ARGUS)
+
+```bash
+# llama.cpp — cukup hapus file model
+rm /path/to/your-model.gguf
+
+# Ollama
+ollama rm <nama-model>
+```
+
+### Pembersihan lengkap
+
+```bash
+cd ..
+rm -rf argus/
+```
+
+Hapus file unit systemd apa pun yang Anda buat:
+
+```bash
+sudo rm /etc/systemd/system/argus.service
+sudo systemctl daemon-reload
+```
+
+---
+
+## 22. FAQ
+
+**Apa itu PostgreSQL?**
+Server basis data — program latar belakang terpisah yang menyimpan dan mengelola data ARGUS. ARGUS sendiri tidak menyimpan apa pun langsung ke disk; ia selalu berbicara dengan PostgreSQL untuk membaca/menulis data. Lihat [§5](#5-instalasi-postgresql) untuk penjelasan lengkap dari nol.
+
+**Mengapa saya butuh `psql`?**
+`psql` adalah cara Anda membuat basis data dan menerapkan `schema.sql` — file yang membuat setiap tabel yang dibutuhkan ARGUS. Tanpa `psql` (atau client PostgreSQL yang setara), Anda tidak memiliki cara untuk menyiapkan basis data sebelum ARGUS terhubung ke sana.
+
+**Apa itu `DB_NAME`?**
+Variabel environment yang dibaca ARGUS untuk mengetahui basis data PostgreSQL mana yang harus dihubungkan. Defaultnya, jika Anda tidak menyetelnya, adalah persis `argus_db` — diverifikasi langsung di `bot/database/db.py`.
+
+**Apa perbedaan antara `argus` dan `argus_db`?**
+Tidak ada secara konseptual — tetapi default sebenarnya milik ARGUS adalah `argus_db`, bukan `argus`. Jika Anda membuat basis data bernama `argus` dan tidak pernah menyetel `DB_NAME=argus` di `.env`, ARGUS akan mencari `argus_db`, tidak menemukannya, dan gagal. Gunakan `argus_db` kecuali Anda punya alasan spesifik untuk menyimpang, dan jika Anda menyimpang, setel `DB_NAME` agar cocok persis.
+
+**Bisakah saya menggunakan role superuser `postgres` untuk ARGUS?**
+Ya — itu default (`DB_USER` default ke `postgres`) dan baik-baik saja untuk penggunaan pribadi/pengembangan. Untuk apa pun yang dibagikan atau menghadap-produksi, buat role khusus sebagai gantinya ([§10](#10-pengguna-postgresql)).
+
+**Bisakah saya menggunakan SQLite alih-alih PostgreSQL?**
+Tidak. Skema dan query ARGUS menggunakan SQL khusus PostgreSQL (`SERIAL`, `TIMESTAMPTZ`, upsert `ON CONFLICT`, indeks parsial, blok `DO $$ ... $$`) yang tidak memiliki ekuivalen langsung di SQLite. Ini akan membutuhkan penulisan ulang seluruh lapisan basis data, bukan perubahan konfigurasi.
+
+**Bisakah saya menggunakan MySQL alih-alih PostgreSQL?**
+Tidak, dengan alasan yang sama seperti SQLite — lapisan skema dan query ditulis secara khusus terhadap sintaks dan fitur PostgreSQL.
+
+**Bisakah saya menonaktifkan fitur AI?**
+Ya, sepenuhnya — cukup biarkan `LLM_URL` tidak diset (atau jangan konfigurasi server LLM yang dapat dijangkau). Endpoint chat AI cukup melaporkan server sebagai offline, dan job analisis AI latar belakang tidak akan memiliki apa pun yang dapat dijangkau untuk dipanggil; tidak ada hal lain dalam ARGUS yang bergantung pada ketersediaan AI.
+
+**Bisakah saya menggunakan Docker?**
+Belum bisa — tidak ada Dockerfile atau `docker-compose.yml` di mana pun dalam pohon kode sumber ARGUS saat ini. Ini hanyalah **Fitur Direncanakan**. Instal ARGUS menggunakan pendekatan virtual-environment dalam panduan ini hari ini.
+
+**Bisakah saya men-deploy ARGUS di Linux?**
+Ya — panduan ini mencakup Linux (Ubuntu/Debian dan Fedora/kompatibel RHEL) sepanjang isinya, termasuk jalur deployment produksi lengkap di [§18](#18-deployment-produksi).
+
+**Bisakah saya menjalankan ARGUS di Windows?**
+Ya, untuk pengembangan dan penggunaan pribadi — panduan ini mencakup instalasi Windows sepanjang isinya. Panduan deployment produksi ([§18](#18-deployment-produksi)) ditulis untuk Linux, karena itu target standar yang diperkeras untuk layanan yang menghadap-internet.
+
+---
+
+## 23. Lampiran untuk Pemula
+
+Penjelasan bahasa sederhana untuk istilah yang digunakan sepanjang panduan ini.
+
+**Database (Basis Data)** — Tempat terstruktur untuk menyimpan informasi sehingga dapat dicari, difilter, dan diperbarui secara andal, alih-alih hidup dalam file teks biasa. Anggap sebagai sistem spreadsheet yang sangat kuat dan sangat terorganisir yang dapat dibaca dan ditulis banyak program sekaligus, dengan aman.
+
+**Table (Tabel)** — Di dalam basis data, sebuah tabel seperti satu lembar dalam spreadsheet: baris dan kolom. Di ARGUS, tabel `assets` memiliki satu baris per perangkat/sistem yang Anda lacak, dengan kolom seperti `vendor`, `product`, dan `version`.
+
+**Schema** — Pengelompokan bernama dari tabel di dalam basis data (grup default PostgreSQL disebut `public`). ARGUS menempatkan setiap tabel yang digunakannya ke dalam grup default ini — Anda tidak pernah perlu membuat yang khusus.
+
+**Role** — Dalam PostgreSQL, sebuah akun yang dapat login dan/atau memiliki sesuatu di dalam basis data. "Role" dan "user" berarti hal yang sama dalam PostgreSQL.
+
+**Owner (Pemilik)** — Role yang memiliki kendali penuh atas tabel atau basis data tertentu. Hanya pemilik (atau superuser) yang dapat dengan bebas memodifikasi strukturnya.
+
+**Primary Key** — Sebuah kolom (atau sekumpulan kolom) yang nilainya dijamin unik untuk setiap baris, digunakan untuk mengidentifikasi baris tersebut secara tidak ambigu. Di tabel `assets` milik ARGUS, ini adalah kolom `id` — tidak ada dua aset yang pernah berbagi `id` yang sama.
+
+**Foreign Key** — Kolom dalam satu tabel yang merujuk ke sebuah baris dalam tabel lain, digunakan untuk menautkan data terkait bersama-sama. Misalnya, sebuah baris dalam tabel `matches` milik ARGUS merujuk ke baris `assets` tertentu (aset mana yang terdampak) dan baris `cves` tertentu (kerentanan mana yang memengaruhinya).
+
+**Port** — Angka yang mengidentifikasi "pintu" jaringan tertentu yang didengarkan sebuah layanan, di mesin tertentu. Nomor pintu standar PostgreSQL adalah 5432; dashboard ARGUS mendengarkan di 5000 secara default.
+
+**Host** — Alamat mesin yang Anda coba jangkau melalui jaringan. `localhost` berarti "mesin yang sama yang sedang Anda gunakan saat ini."
+
+**Environment Variable (Variabel Environment)** — Pengaturan bernama yang Anda berikan ke sebuah program dari luar kodenya sendiri, tanpa menyunting kode itu sendiri. ARGUS membaca konfigurasinya (password basis data, secret key, token Telegram, dll.) dari variabel environment yang ditempatkan dalam file `.env`.
+
+**PATH** — Daftar yang disimpan sistem operasi Anda berisi folder untuk dicari setiap kali Anda mengetik nama perintah (seperti `python` atau `psql`), sehingga ia tahu program mana yang Anda maksud tanpa Anda mengetik lokasi file lengkap program setiap kali.
+
+**Virtual Environment** — Salinan Python dan paket terinstalnya yang terisolasi dan mandiri, khusus untuk satu proyek. Ini menjaga versi paket persis yang dibutuhkan ARGUS terpisah dari proyek Python lain apa pun di mesin Anda, sehingga tidak dapat saling mengganggu.
+
+**Migration (Migrasi)** — Skrip yang mengubah struktur basis data (menambahkan tabel, kolom, atau constraint) dengan cara yang aman diterapkan pada basis data yang sudah ada yang sudah memiliki data nyata di dalamnya, tanpa menghapus apa pun. `migrate.py` milik ARGUS persis skrip semacam ini.
+
+**Connection Pool** — Cache koneksi basis data yang sudah terbuka yang digunakan ulang sebuah program alih-alih membuat (dan menghancurkan) koneksi baru untuk setiap operasi basis data tunggal. Ini jauh lebih cepat, karena membangun koneksi baru memiliki overhead nyata. ARGUS menjaga pool 2–20 koneksi tetap terbuka secara default (`DB_POOL_MIN_CONN`/`DB_POOL_MAX_CONN`).
+
+**Scheduler** — Komponen yang menjalankan tugas tertentu secara otomatis pada waktu atau interval yang ditetapkan, tanpa perlu seseorang memicunya secara manual. Scheduler ARGUS menjalankan pemindaian kerentanan setiap hari pukul 06:00, menghasilkan laporan mingguan dan bulanan, dan memproses analisis AI dalam batch kecil setiap 5 menit.
+
+**Background Job (Job Latar Belakang)** — Tugas yang berjalan sendiri, terpisah dari apa pun yang sedang aktif dilakukan pengguna di dashboard pada saat itu — misalnya, pemindaian harian ARGUS berjalan di latar belakang terlepas dari apakah ada orang yang sedang melihat dashboard saat itu terpicu.
