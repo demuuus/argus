@@ -3,2073 +3,1398 @@
 ARGUS Database Migration System
 ================================
 
-Single-command, fully idempotent installer/upgrader for the ARGUS
-PostgreSQL schema.
+Single-command installer and migration runner for ARGUS.
 
     python database/migrate.py
 
-...is the entire installation workflow. This script:
+That is the entire install procedure. This script will, in order:
 
-  1. Verifies it can reach the PostgreSQL server at all, and explains
-     exactly what's wrong (bad password, bad host, bad port, server not
-     running, etc.) if it can't.
-  2. Checks whether the target database itself exists, and creates it
-     automatically if the connecting role has permission to (otherwise
-     prints the exact command an admin needs to run).
-  3. Bootstraps the base schema (tables, indexes, views defined in
-     schema.sql) on a brand-new, completely empty database — something
-     the previous version of this script never did, which is why fresh
-     installs used to fail with errors like `relation "assets" does not
-     exist`.
-  4. Applies every incremental migration that has shipped since (AI
-     Security Copilot tables, risk snapshot history, chat response
-     cache, City Exposure Overview columns, asset exposure/function
-     metadata, patch planning columns) — safe to run against a
-     completely fresh database, a partially-upgraded one, or a
-     fully-current one, in any order, any number of times.
-  5. Verifies the result: every required table, view, foreign key,
-     constraint, and index actually exists after the fact, rather than
-     assuming a CREATE statement that didn't error means the object is
-     now in the expected shape.
-  6. Records every migration attempt (name, version, checksum, duration,
-     status) in a `schema_version` table, so re-running this script is
-     cheap (already-applied migrations are skipped) and auditable
-     (you can see exactly what was applied and when).
-  7. Prints a clear, structured summary at the end — modeled on the
-     kind of output Django, Alembic, Flyway, and Rails migrations give
-     you — instead of a wall of raw SQL echoed to the terminal.
+  1. Verify it can reach the PostgreSQL server at all (host/port/user/password).
+  2. Check whether the configured database exists, and create it automatically
+     if the connecting role has CREATEDB privileges (or explain how, if not).
+  3. Connect to the target database.
+  4. Ensure the `schema_version` bookkeeping table exists.
+  5. Check whether the core tables (assets, cves, matches, alerts, reports,
+     users) exist.
+  6. If any core table is missing, execute schema.sql automatically — nobody
+     ever has to run `psql -f schema.sql` by hand.
+  7. Verify schema.sql actually produced the core tables/keys/indexes/views.
+  8. Apply every incremental migration that has not already been recorded as
+     applied in `schema_version` (idempotent — safe to run 1, 2, or 100
+     times).
+  9. Seed any required baseline data (currently: none — ARGUS creates its
+     first user through the web UI's registration flow, see
+     dashboard/app.py; this step exists so future baseline data has a home).
+ 10. Create/refresh every AI view with CREATE OR REPLACE VIEW.
+ 11. Verify every expected index exists (creating any still missing).
+ 12. Verify foreign keys.
+ 13. Verify check/unique constraints.
+ 14. Verify triggers (ARGUS defines none today; the hook exists for the day
+     it does).
+ 15. Verify functions (same — none today).
+ 16. Print a checklist confirming every required table exists.
+ 17. Print a checklist confirming every required view exists.
+ 18. Report the applied schema version.
+ 19. Print a final summary.
 
-Every table, column, index, constraint, and view this script knows about
-was taken directly from the actual ARGUS codebase (schema.sql, the
-previous migrate.py, and every database/*.py module that issues SQL) —
-see the `MIGRATIONS` list and `REQUIRED_TABLES`/`REQUIRED_VIEWS` below,
-each of which cites where it came from. Nothing here is invented or
-guessed. As of this rewrite, ARGUS defines no custom PostgreSQL
-functions or triggers anywhere in its codebase, so this script's
-function/trigger verification steps report an expected count of zero —
-they are implemented and wired up so that adding a real function or
-trigger to ARGUS in the future only requires listing it, not building
-new verification machinery.
+Every step is idempotent. Every DDL statement checks for the object it's
+about to touch before touching it. Running this script against a database
+that is already fully migrated is a fast no-op that reconfirms everything
+is healthy.
 
-Usage:
-    python database/migrate.py                 # full install/upgrade (default)
-    python database/migrate.py --check          # verify only, make no changes
-    python database/migrate.py --verbose        # print every SQL statement run
-    python database/migrate.py --no-color       # disable ANSI colors in output
-    python database/migrate.py --yes            # never prompt (default: never prompts anyway)
-    python database/migrate.py --skip-create-db # never attempt CREATE DATABASE
-
-Exit codes:
-    0  — success (or --check found no problems)
-    1  — could not connect to the PostgreSQL server at all
-    2  — target database does not exist and could not be created
-    3  — one or more required schema objects are missing/broken after migration
-    4  — one or more migrations failed to apply
-    5  — unexpected/unhandled error
+Flags:
+    --verify-only        Skip all migration/creation steps; just run the
+                          verification checklist (steps 12-19) against the
+                          database as it currently stands.
+    --dry-run             Show what would be applied, without applying it.
+    --continue-on-error   Keep applying later migrations after one fails
+                           instead of stopping (default: stop — a failed
+                           migration usually means later ones would be
+                           built on a broken assumption).
+    --yes, -y              Don't prompt before creating the database.
 """
-
-from __future__ import annotations
 
 import argparse
 import hashlib
-import logging
 import os
 import re
 import sys
 import time
-import traceback
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Callable, List, Optional, Sequence, Tuple
+from typing import Optional
 
 import psycopg2
-import psycopg2.errorcodes
 import psycopg2.extensions
-from psycopg2 import sql as pgsql
+import psycopg2.errors
+from dotenv import load_dotenv
 
-try:
-    from dotenv import load_dotenv
-except ImportError:  # pragma: no cover - dotenv is a hard ARGUS dependency,
-    # but this script should still explain itself clearly if the venv is
-    # wrong, rather than dying on an ImportError stack trace.
-    def load_dotenv(*_a, **_kw):
-        return False
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Path / environment bootstrapping
-# ══════════════════════════════════════════════════════════════════════════
-
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROJECT_ROOT = os.path.dirname(_THIS_DIR)
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
-
-# Load .env from the project root first (the normal ARGUS layout), then
-# fall back to python-dotenv's default search (CWD and parents) so this
-# script also works if invoked from inside database/ directly.
-load_dotenv(os.path.join(_PROJECT_ROOT, ".env"))
 load_dotenv()
 
-SCRIPT_START_TIME = time.monotonic()
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Structured logging
-# ══════════════════════════════════════════════════════════════════════════
-
-class _Ansi:
-    """ANSI color codes, disabled automatically when stdout isn't a TTY or
-    NO_COLOR is set (https://no-color.org), and via --no-color."""
-
-    ENABLED = sys.stdout.isatty() and os.environ.get("NO_COLOR", "") == ""
-
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    RED = "\033[31m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    BLUE = "\033[34m"
-    CYAN = "\033[36m"
-    GRAY = "\033[90m"
-
-    @classmethod
-    def wrap(cls, text: str, *codes: str) -> str:
-        if not cls.ENABLED:
-            return text
-        return "".join(codes) + text + cls.RESET
-
-
-def _ts() -> str:
-    return datetime.now().strftime("%H:%M:%S")
-
-
-class MigrationLogger:
-    """
-    Thin structured-logging wrapper. Distinct from Python's `logging`
-    module on purpose: this script is a standalone CLI tool whose output
-    is read by a human watching a terminal during installation, not a
-    library emitting into an application's log aggregation — the
-    formatting priorities (colored tags, progress bars, a final summary
-    block) are specific to that use case.
-    """
-
-    def __init__(self, verbose: bool = False, quiet: bool = False):
-        self.verbose = verbose
-        self.quiet = quiet
-        self.warnings: List[str] = []
-        self.errors: List[str] = []
-
-    def _emit(self, tag: str, color: str, msg: str, force: bool = False):
-        if self.quiet and not force:
-            return
-        prefix = _Ansi.wrap(f"[{tag}]", _Ansi.BOLD, color)
-        print(f"{_Ansi.wrap(_ts(), _Ansi.GRAY)} {prefix} {msg}")
-
-    def info(self, msg: str):
-        self._emit("INFO", _Ansi.BLUE, msg)
-
-    def warn(self, msg: str):
-        self.warnings.append(msg)
-        self._emit("WARNING", _Ansi.YELLOW, msg, force=True)
-
-    def success(self, msg: str):
-        self._emit("SUCCESS", _Ansi.GREEN, msg)
-
-    def error(self, msg: str):
-        self.errors.append(msg)
-        self._emit("ERROR", _Ansi.RED, msg, force=True)
-
-    def debug(self, msg: str):
-        if self.verbose:
-            self._emit("DEBUG", _Ansi.GRAY, msg)
-
-    def step(self, n: int, total: int, msg: str):
-        label = _Ansi.wrap(f"Step {n:>2}/{total}", _Ansi.BOLD, _Ansi.CYAN)
-        print(f"\n{label}  {_Ansi.wrap(msg, _Ansi.BOLD)}")
-
-    def section(self, msg: str):
-        bar = "─" * max(4, min(70, len(msg) + 4))
-        print(f"\n{_Ansi.wrap(bar, _Ansi.GRAY)}")
-        print(_Ansi.wrap(msg, _Ansi.BOLD, _Ansi.CYAN))
-        print(_Ansi.wrap(bar, _Ansi.GRAY))
-
-    def progress(self, current: int, total: int, label: str = ""):
-        """Simple in-place progress bar for a loop of known length."""
-        if self.quiet or total <= 0:
-            return
-        width = 28
-        filled = int(width * current / total)
-        bar = "█" * filled + "░" * (width - filled)
-        pct = int(100 * current / total)
-        line = f"  [{bar}] {pct:3d}%  {label}"
-        pad = " " * max(0, 100 - len(line))
-        end = "\n" if current == total else ""
-        print(f"\r{line}{pad}", end=end, flush=True)
-
-
-LOG = MigrationLogger()
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Configuration
-# ══════════════════════════════════════════════════════════════════════════
-
-@dataclass
-class DBConfig:
-    """
-    Mirrors database/db.py's environment-variable configuration exactly
-    (same variable names, same defaults) so this script and the running
-    application always agree on which database they're talking about.
-    """
-    host: str
-    port: int
-    user: str
-    password: str
-    database: str
-    connect_timeout: int = 10
-
-    @property
-    def safe_repr(self) -> str:
-        """Connection details safe to print (never the password)."""
-        return f"{self.user}@{self.host}:{self.port}/{self.database}"
-
-
-def load_config() -> DBConfig:
-    password = os.getenv("DB_PASSWORD", "")
-    if not password:
-        LOG.warn(
-            "DB_PASSWORD is not set in the environment or .env file. "
-            "Attempting to connect with no password — this will fail "
-            "unless your PostgreSQL server is configured for trust/peer "
-            "authentication for this role."
-        )
-    return DBConfig(
-        host=os.getenv("DB_HOST", "localhost"),
-        port=int(os.getenv("DB_PORT", 5432)),
-        user=os.getenv("DB_USER", "postgres"),
-        password=password,
-        database=os.getenv("DB_NAME", "argus_db"),
-        connect_timeout=int(os.getenv("DB_CONNECT_TIMEOUT", 10)),
-    )
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Exceptions
-# ══════════════════════════════════════════════════════════════════════════
-
-class MigrationError(Exception):
-    """Base class for every error this script raises intentionally."""
-
-
-class ServerUnreachable(MigrationError):
-    """Could not reach the PostgreSQL server process at all."""
-
-
-class DatabaseMissing(MigrationError):
-    """The target database does not exist and could not be created."""
-
-
-class SchemaVerificationFailed(MigrationError):
-    """One or more required schema objects are missing after migration."""
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Connection-error classification
-# ══════════════════════════════════════════════════════════════════════════
-
-def classify_connection_error(exc: Exception, config: DBConfig) -> str:
-    """
-    Turn a raw psycopg2/OperationalError message into a specific,
-    actionable explanation. psycopg2 does not give structured error codes
-    for connection-phase failures (those come from the OS/libpq, before
-    a PostgreSQL error code would even be assigned), so this matches on
-    the well-known libpq message text.
-    """
-    msg = str(exc).strip()
-    low = msg.lower()
-
-    if "password authentication failed" in low:
-        return (
-            f"Authentication failed for user '{config.user}' at "
-            f"{config.host}:{config.port}.\n"
-            f"    → Check DB_USER and DB_PASSWORD in your .env file.\n"
-            f"    → Verify the role exists: "
-            f"psql -U postgres -h {config.host} -c \"\\du\""
-        )
-    if "role" in low and "does not exist" in low:
-        return (
-            f"The role (user) '{config.user}' does not exist on the "
-            f"PostgreSQL server at {config.host}:{config.port}.\n"
-            f"    → Create it: "
-            f"createuser -h {config.host} -p {config.port} -P {config.user}"
-        )
-    if "could not translate host name" in low or "could not resolve" in low:
-        return (
-            f"The hostname '{config.host}' could not be resolved.\n"
-            f"    → Check DB_HOST in your .env file for typos.\n"
-            f"    → If PostgreSQL runs on this machine, try DB_HOST=localhost."
-        )
-    if "connection refused" in low:
-        return (
-            f"Connection refused by {config.host}:{config.port}.\n"
-            f"    → Is PostgreSQL actually running? "
-            f"(sudo systemctl status postgresql)\n"
-            f"    → Is it listening on port {config.port}? Check "
-            f"postgresql.conf's `port` setting.\n"
-            f"    → Is DB_HOST/DB_PORT correct in your .env file?"
-        )
-    if "timeout expired" in low or "timed out" in low:
-        return (
-            f"Connection to {config.host}:{config.port} timed out after "
-            f"{config.connect_timeout}s.\n"
-            f"    → Check firewall rules between this machine and the "
-            f"database host.\n"
-            f"    → Verify DB_HOST/DB_PORT are correct."
-        )
-    if "no route to host" in low:
-        return (
-            f"No network route to {config.host}:{config.port}.\n"
-            f"    → Check DB_HOST is correct and the host is reachable "
-            f"from this machine (e.g. `ping {config.host}`)."
-        )
-    if "server closed the connection unexpectedly" in low:
-        return (
-            "The PostgreSQL server closed the connection unexpectedly. "
-            "This usually means the server is still starting up, is "
-            "overloaded, or crashed. Check the PostgreSQL server logs."
-        )
-    if "database" in low and "does not exist" in low:
-        # Handled explicitly by database_exists()/create_database_if_missing()
-        # elsewhere, but keep a sane message here in case this surfaces
-        # from an unexpected code path.
-        return (
-            f"Database '{config.database}' does not exist on "
-            f"{config.host}:{config.port}. This script normally handles "
-            f"this automatically — see the 'checking database exists' step above."
-        )
-    if "too many connections" in low:
-        return (
-            "The PostgreSQL server has reached its max_connections limit. "
-            "Close idle connections or increase max_connections in "
-            "postgresql.conf."
-        )
-    if "ssl" in low:
-        return (
-            f"An SSL/TLS negotiation error occurred connecting to "
-            f"{config.host}:{config.port}: {msg}\n"
-            f"    → If the server does not use SSL, this may indicate a "
-            f"misconfigured DB_HOST (wrong service on that port)."
-        )
-
-    # Fallback — still specific about which connection attempt failed.
-    return f"Could not connect to PostgreSQL at {config.safe_repr}: {msg}"
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Low-level connection helpers
-# ══════════════════════════════════════════════════════════════════════════
-
-# Maintenance databases to try, in order, when we need a connection that
-# does NOT depend on the ARGUS target database already existing (needed
-# to run `CREATE DATABASE` and to check pg_database in the first place).
-# 'postgres' exists on essentially every real-world PostgreSQL install;
-# falling back to the connecting role's own username covers the (rarer)
-# case where a hosting provider has removed the 'postgres' maintenance DB.
-_MAINTENANCE_DB_CANDIDATES = ("postgres", "template1")
-
-
-def _raw_connect(config: DBConfig, dbname: str, autocommit: bool = False):
-    conn = psycopg2.connect(
-        host=config.host,
-        port=config.port,
-        user=config.user,
-        password=config.password,
-        dbname=dbname,
-        connect_timeout=config.connect_timeout,
-    )
-    if autocommit:
-        conn.autocommit = True
-    return conn
-
-
-def verify_postgres_connection(config: DBConfig) -> Tuple[bool, Optional[str]]:
-    """
-    Step 1: confirm the PostgreSQL *server* itself is reachable and the
-    given credentials are valid, independent of whether the ARGUS
-    target database exists yet. Tries each maintenance database
-    candidate in turn since the target database's own non-existence
-    must never be mistaken for "the server is unreachable."
-
-    Returns (ok, error_message).
-    """
-    last_error: Optional[Exception] = None
-    for maint_db in _MAINTENANCE_DB_CANDIDATES:
-        try:
-            conn = _raw_connect(config, maint_db, autocommit=True)
-            conn.close()
-            return True, None
-        except psycopg2.OperationalError as exc:
-            low = str(exc).lower()
-            if "does not exist" in low and "database" in low:
-                # This maintenance DB candidate doesn't exist on this
-                # server — try the next one; this is not itself proof
-                # the server is unreachable.
-                last_error = exc
-                continue
-            last_error = exc
-            break
-        except psycopg2.Error as exc:
-            last_error = exc
-            break
-
-    assert last_error is not None
-    return False, classify_connection_error(last_error, config)
-
-
-def get_maintenance_connection(config: DBConfig):
-    """
-    Return an autocommit connection to whichever maintenance database is
-    reachable. Required because CREATE DATABASE cannot run inside a
-    transaction block, and because checking pg_database must not require
-    the target ARGUS database to already exist.
-    """
-    last_error: Optional[Exception] = None
-    for maint_db in _MAINTENANCE_DB_CANDIDATES:
-        try:
-            return _raw_connect(config, maint_db, autocommit=True)
-        except psycopg2.OperationalError as exc:
-            last_error = exc
-            continue
-    raise ServerUnreachable(classify_connection_error(last_error, config))
-
-
-def database_exists(config: DBConfig) -> bool:
-    """Step 2: check pg_database for the configured target database."""
-    conn = get_maintenance_connection(config)
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (config.database,))
-            return cur.fetchone() is not None
-    finally:
-        conn.close()
-
-
-def create_database_if_missing(config: DBConfig, allow_create: bool = True) -> bool:
-    """
-    Step 2 (continued): create the target database if it's missing and
-    the connecting role has CREATEDB (or superuser) privilege.
-
-    Returns True if the database exists after this call (whether it
-    already existed or was just created), False if it's still missing.
-    """
-    if database_exists(config):
-        LOG.debug(f"Database '{config.database}' already exists.")
-        return True
-
-    LOG.warn(f"Database '{config.database}' does not exist on {config.host}:{config.port}.")
-
-    if not allow_create:
-        LOG.error(
-            f"Automatic database creation was disabled (--skip-create-db). "
-            f"Create it manually:\n"
-            f"    createdb -h {config.host} -p {config.port} -U {config.user} {config.database}"
-        )
-        return False
-
-    conn = get_maintenance_connection(config)
-    try:
-        with conn.cursor() as cur:
-            try:
-                cur.execute(
-                    pgsql.SQL("CREATE DATABASE {}").format(pgsql.Identifier(config.database))
-                )
-                LOG.success(f"Created database '{config.database}'.")
-                return True
-            except psycopg2.errors.InsufficientPrivilege:
-                LOG.error(
-                    f"Role '{config.user}' does not have permission to create "
-                    f"databases. Ask a PostgreSQL administrator to run:\n"
-                    f"    CREATE DATABASE {config.database} OWNER {config.user};\n"
-                    f"  or grant CREATEDB:\n"
-                    f"    ALTER ROLE {config.user} CREATEDB;"
-                )
-                return False
-            except psycopg2.errors.DuplicateDatabase:
-                # Race condition: something else created it between our
-                # existence check and this CREATE DATABASE call. Fine.
-                LOG.debug("Database was created concurrently by another process.")
-                return True
-    finally:
-        conn.close()
-
-
-def get_target_connection(config: DBConfig):
-    """Step 3: connect to the (now guaranteed-to-exist) target database."""
-    try:
-        return _raw_connect(config, config.database, autocommit=False)
-    except psycopg2.OperationalError as exc:
-        raise ServerUnreachable(classify_connection_error(exc, config)) from exc
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Existence-check helper functions
-# (operate against an open connection to the *target* database)
-# ══════════════════════════════════════════════════════════════════════════
-
-def table_exists(conn, name: str, schema: str = "public") -> bool:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT 1 FROM information_schema.tables
-            WHERE table_schema = %s AND table_name = %s
-            """,
-            (schema, name),
-        )
-        return cur.fetchone() is not None
-
-
-def column_exists(conn, table: str, column: str, schema: str = "public") -> bool:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT 1 FROM information_schema.columns
-            WHERE table_schema = %s AND table_name = %s AND column_name = %s
-            """,
-            (schema, table, column),
-        )
-        return cur.fetchone() is not None
-
-
-def view_exists(conn, name: str, schema: str = "public") -> bool:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT 1 FROM information_schema.views
-            WHERE table_schema = %s AND table_name = %s
-            """,
-            (schema, name),
-        )
-        return cur.fetchone() is not None
-
-
-def index_exists(conn, name: str, schema: str = "public") -> bool:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT 1 FROM pg_indexes
-            WHERE schemaname = %s AND indexname = %s
-            """,
-            (schema, name),
-        )
-        return cur.fetchone() is not None
-
-
-def constraint_exists(conn, name: str, table: Optional[str] = None) -> bool:
-    with conn.cursor() as cur:
-        if table:
-            cur.execute(
-                """
-                SELECT 1 FROM information_schema.table_constraints
-                WHERE constraint_name = %s AND table_name = %s
-                """,
-                (name, table),
-            )
-        else:
-            cur.execute(
-                "SELECT 1 FROM pg_constraint WHERE conname = %s",
-                (name,),
-            )
-        return cur.fetchone() is not None
-
-
-def trigger_exists(conn, name: str) -> bool:
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT 1 FROM information_schema.triggers WHERE trigger_name = %s",
-            (name,),
-        )
-        return cur.fetchone() is not None
-
-
-def function_exists(conn, name: str, schema: str = "public") -> bool:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT 1 FROM pg_proc p
-            JOIN pg_namespace n ON n.oid = p.pronamespace
-            WHERE n.nspname = %s AND p.proname = %s
-            """,
-            (schema, name),
-        )
-        return cur.fetchone() is not None
-
-
-def schema_exists(conn, name: str = "public") -> bool:
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT 1 FROM information_schema.schemata WHERE schema_name = %s",
-            (name,),
-        )
-        return cur.fetchone() is not None
-
-
-def sequence_exists(conn, name: str, schema: str = "public") -> bool:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT 1 FROM information_schema.sequences
-            WHERE sequence_schema = %s AND sequence_name = %s
-            """,
-            (schema, name),
-        )
-        return cur.fetchone() is not None
-
-
-def foreign_key_exists(conn, constraint_name: str) -> bool:
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT 1 FROM pg_constraint
-            WHERE conname = %s AND contype = 'f'
-            """,
-            (constraint_name,),
-        )
-        return cur.fetchone() is not None
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# schema_version tracking table
-# ══════════════════════════════════════════════════════════════════════════
-
-SCHEMA_VERSION_TABLE = "schema_version"
-
-
-def ensure_schema_version_table(conn) -> None:
-    """
-    Step 4: this table is this migration system's own bookkeeping — it
-    is not part of the application schema that database/*.py modules
-    query, and did not exist in any previous version of ARGUS. It exists
-    purely so this script can (a) skip migrations it has already applied
-    successfully, without re-deriving that from probing table/column
-    existence every time, and (b) give operators an audit trail of
-    exactly what ran and when, matching what Django/Alembic/Flyway/Rails
-    each do with their own migration-history tables.
-    """
-    if table_exists(conn, SCHEMA_VERSION_TABLE):
-        return
-    with conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {SCHEMA_VERSION_TABLE} (
-                    id                SERIAL PRIMARY KEY,
-                    version           INTEGER     NOT NULL,
-                    migration_name    TEXT        NOT NULL,
-                    checksum          TEXT        NOT NULL,
-                    status            TEXT        NOT NULL
-                                      CHECK (status IN ('success', 'failed')),
-                    duration_ms       INTEGER     NOT NULL DEFAULT 0,
-                    error_message     TEXT,
-                    applied_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-            cur.execute(
-                f"""
-                CREATE INDEX IF NOT EXISTS idx_{SCHEMA_VERSION_TABLE}_name
-                ON {SCHEMA_VERSION_TABLE}(migration_name)
-                """
-            )
-    LOG.success(f"Created '{SCHEMA_VERSION_TABLE}' tracking table.")
-
-
-def checksum_of(text: str) -> str:
-    """Stable checksum of a migration's SQL body, used to detect whether
-    a migration's definition has changed since it was last recorded as
-    applied (in which case it should run again, since IF NOT EXISTS
-    guards make re-running safe regardless)."""
-    normalized = re.sub(r"\s+", " ", text).strip()
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-
-
-def get_last_recorded_run(conn, migration_name: str) -> Optional[dict]:
-    with conn.cursor() as cur:
-        cur.execute(
-            f"""
-            SELECT checksum, status FROM {SCHEMA_VERSION_TABLE}
-            WHERE migration_name = %s
-            ORDER BY applied_at DESC
-            LIMIT 1
-            """,
-            (migration_name,),
-        )
-        row = cur.fetchone()
-        if not row:
-            return None
-        return {"checksum": row[0], "status": row[1]}
-
-
-def record_migration(
-    conn,
-    version: int,
-    name: str,
-    checksum: str,
-    status: str,
-    duration_ms: int,
-    error_message: Optional[str] = None,
-) -> None:
-    with conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                INSERT INTO {SCHEMA_VERSION_TABLE}
-                    (version, migration_name, checksum, status, duration_ms, error_message)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                """,
-                (version, name, checksum, status, duration_ms,
-                 (error_message or "")[:4000] or None),
-            )
-
-
-def get_current_schema_version(conn) -> int:
-    if not table_exists(conn, SCHEMA_VERSION_TABLE):
-        return 0
-    with conn.cursor() as cur:
-        cur.execute(
-            f"""
-            SELECT COALESCE(MAX(version), 0) FROM {SCHEMA_VERSION_TABLE}
-            WHERE status = 'success'
-            """
-        )
-        return cur.fetchone()[0]
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Canonical schema inventory
-#
-# Every table/view/index/constraint listed below was verified directly
-# against schema.sql and database/*.py (see the per-item citation). This
-# is the source of truth this script verifies against — it does not
-# assume schema.sql or MIGRATIONS below are correct; it checks the
-# database itself after applying them.
-# ══════════════════════════════════════════════════════════════════════════
-
-# schema.sql: assets, cves, matches, alerts, reports, users (+ views)
-# migrate.py (previous version): ai_conversations, ai_messages,
-#   cve_ai_analysis, risk_snapshots, ai_response_cache
-REQUIRED_TABLES: List[str] = [
-    "users",
-    "assets",
-    "cves",
-    "matches",
-    "alerts",
-    "reports",
-    "risk_snapshots",
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SCHEMA_FILE = os.path.join(SCRIPT_DIR, "schema.sql")
+
+# Overall ARGUS schema version. Bump this whenever a release adds a new
+# batch of migrations, independent of how many individual ALTER/CREATE
+# statements that batch contains.
+CURRENT_SCHEMA_VERSION = "3.2"
+
+DB_CONFIG = {
+    "host": os.getenv("DB_HOST", "localhost"),
+    "database": os.getenv("DB_NAME", "argus_db"),
+    "user": os.getenv("DB_USER", "postgres"),
+    "password": os.getenv("DB_PASSWORD") or "",
+    "port": int(os.getenv("DB_PORT", 5432)),
+    "connect_timeout": 5,
+}
+
+# Tables that schema.sql itself is responsible for creating. If any of
+# these is missing, schema.sql has never been applied to this database and
+# must be run before anything else.
+CORE_TABLES = ["assets", "cves", "matches", "alerts", "reports", "users"]
+
+# The complete set of tables ARGUS requires to run, including the ones that
+# only ever get created through incremental migrations (schema.sql was
+# never updated to define these — see the note in MIGRATIONS below).
+REQUIRED_TABLES = CORE_TABLES + [
     "ai_conversations",
     "ai_messages",
     "ai_response_cache",
     "cve_ai_analysis",
+    "risk_snapshots",
 ]
 
-# schema.sql's four `CREATE OR REPLACE VIEW` statements, consumed by
-# Ai/context_builder.py.
-REQUIRED_VIEWS: List[str] = [
+REQUIRED_VIEWS = [
     "ai_dashboard",
     "ai_open_findings",
     "ai_asset_summary",
     "ai_vulnerability_summary",
 ]
 
-# (table, column) pairs that database/*.py modules actually SELECT/INSERT
-# by name — i.e. a query would raise `column "..." does not exist`
-# without it. Not an exhaustive dump of every column; a targeted list of
-# the ones every module in this codebase depends on existing.
-REQUIRED_COLUMNS: List[Tuple[str, str]] = [
-    ("assets", "id"), ("assets", "vendor"), ("assets", "product"),
-    ("assets", "version"), ("assets", "type"), ("assets", "location"),
-    ("assets", "owner"), ("assets", "criticality"), ("assets", "notes"),
-    ("assets", "last_scan"), ("assets", "created_at"),
-    ("assets", "search_keyword"), ("assets", "city"),
-    ("assets", "country_code"), ("assets", "exposure"), ("assets", "function"),
-    ("cves", "cve_id"), ("cves", "cvss"), ("cves", "severity"),
-    ("cves", "kev"), ("cves", "published"), ("cves", "description"),
-    ("cves", "created_at"), ("cves", "epss"), ("cves", "epss_percentile"),
-    ("matches", "id"), ("matches", "asset_id"), ("matches", "cve_id"),
-    ("matches", "risk_score"), ("matches", "first_seen"),
-    ("matches", "status"), ("matches", "patched"), ("matches", "resolved_at"),
-    ("matches", "due_date"), ("matches", "assigned_to"),
-    ("matches", "assigned_team"), ("matches", "planned_patch_date"),
-    ("matches", "patch_notes"),
-    ("alerts", "id"), ("alerts", "asset_id"), ("alerts", "message"), ("alerts", "sent_at"),
-    ("reports", "id"), ("reports", "report_type"), ("reports", "generated_at"), ("reports", "file_path"),
-    ("users", "id"), ("users", "username"), ("users", "password_hash"), ("users", "role"), ("users", "created_at"),
-    ("ai_conversations", "id"), ("ai_conversations", "username"),
-    ("ai_conversations", "title"), ("ai_conversations", "created_at"),
-    ("ai_conversations", "updated_at"), ("ai_conversations", "archived"),
-    ("ai_messages", "id"), ("ai_messages", "conversation_id"),
-    ("ai_messages", "role"), ("ai_messages", "content"),
-    ("ai_messages", "tokens"), ("ai_messages", "created_at"),
-    ("ai_response_cache", "cache_key"), ("ai_response_cache", "question"),
-    ("ai_response_cache", "response"), ("ai_response_cache", "tokens"),
-    ("ai_response_cache", "hit_count"), ("ai_response_cache", "created_at"),
-    ("ai_response_cache", "expires_at"),
-    ("cve_ai_analysis", "cve_id"), ("cve_ai_analysis", "summary"),
-    ("cve_ai_analysis", "explanation"), ("cve_ai_analysis", "guidance"),
-    ("cve_ai_analysis", "attack_scenario"), ("cve_ai_analysis", "business_impact"),
-    ("cve_ai_analysis", "technical_impact"), ("cve_ai_analysis", "recommended_actions"),
-    ("cve_ai_analysis", "model_used"), ("cve_ai_analysis", "description_hash"),
-    ("cve_ai_analysis", "status"), ("cve_ai_analysis", "retry_count"),
-    ("cve_ai_analysis", "error_message"), ("cve_ai_analysis", "analyzed_at"),
-    ("cve_ai_analysis", "created_at"), ("cve_ai_analysis", "updated_at"),
-    ("risk_snapshots", "id"), ("risk_snapshots", "snapshot_date"),
-    ("risk_snapshots", "total_findings"), ("risk_snapshots", "open_findings"),
-    ("risk_snapshots", "resolved_findings"), ("risk_snapshots", "kev_findings"),
-    ("risk_snapshots", "overdue_findings"), ("risk_snapshots", "critical_findings"),
-    ("risk_snapshots", "high_findings"), ("risk_snapshots", "avg_risk_score"),
-    ("risk_snapshots", "max_risk_score"), ("risk_snapshots", "total_assets"),
+# (table, column) pairs that must be backed by a FOREIGN KEY.
+REQUIRED_FOREIGN_KEYS = [
+    ("matches", "asset_id"),
+    ("matches", "cve_id"),
+    ("alerts", "asset_id"),
+    ("ai_messages", "conversation_id"),
+    ("cve_ai_analysis", "cve_id"),
 ]
 
-# Named foreign keys this script expects to exist after migration,
-# because a previous production incident (documented inline in the old
-# migrate.py) showed CREATE TABLE IF NOT EXISTS silently skipping a FK
-# when the table already existed in an older shape. Verifying these by
-# name, not just "does matches reference assets somehow", is the point.
-REQUIRED_FOREIGN_KEYS: List[str] = [
-    "ai_messages_conversation_id_fkey",
+# (table, column) pairs that must be backed by a CHECK constraint.
+REQUIRED_CHECK_CONSTRAINTS = [
+    ("assets", "exposure"),
+    ("matches", "status"),
+    ("cve_ai_analysis", "status"),
+    ("ai_messages", "role"),
 ]
 
-# Named CHECK/UNIQUE constraints this script expects to exist.
-REQUIRED_CONSTRAINTS: List[Tuple[str, str]] = [
-    ("matches_asset_id_cve_id_key", "matches"),
-    ("assets_exposure_check", "assets"),
-    ("cve_ai_analysis_status_check", "cve_ai_analysis"),
+# (table, (columns...)) that must be backed by a UNIQUE constraint.
+REQUIRED_UNIQUE_CONSTRAINTS = [
+    ("matches", ("asset_id", "cve_id")),
+    ("users", ("username",)),
+    ("risk_snapshots", ("snapshot_date",)),
 ]
 
-REQUIRED_INDEXES: List[str] = [
-    "idx_matches_asset_id", "idx_matches_cve_id", "idx_matches_risk",
-    "idx_matches_status", "idx_matches_due_date",
-    "idx_assets_type", "idx_cves_kev", "idx_cves_cvss",
-    "idx_ai_conversations_username", "idx_ai_messages_conversation",
-    "idx_cve_ai_analysis_status", "idx_risk_snapshots_date",
-    "idx_ai_response_cache_expires", "idx_assets_city_country",
-    "idx_assets_exposure", "idx_assets_function",
-    "idx_matches_planned_patch_date",
+REQUIRED_INDEXES = [
+    ("idx_matches_asset_id", "matches"),
+    ("idx_matches_cve_id", "matches"),
+    ("idx_matches_risk", "matches"),
+    ("idx_matches_status", "matches"),
+    ("idx_matches_due_date", "matches"),
+    ("idx_matches_asset_cve", "matches"),
+    ("idx_matches_planned_patch_date", "matches"),
+    ("idx_assets_type", "assets"),
+    ("idx_assets_exposure", "assets"),
+    ("idx_assets_function", "assets"),
+    ("idx_assets_city_country", "assets"),
+    ("idx_cves_kev", "cves"),
+    ("idx_cves_cvss", "cves"),
+    ("idx_ai_conversations_username", "ai_conversations"),
+    ("idx_ai_messages_conversation", "ai_messages"),
+    ("idx_cve_ai_analysis_status", "cve_ai_analysis"),
+    ("idx_risk_snapshots_date", "risk_snapshots"),
+    ("idx_ai_response_cache_expires", "ai_response_cache"),
 ]
-
-# ARGUS defines no custom PL/pgSQL functions or triggers anywhere in its
-# codebase as of this rewrite (verified by grep across schema.sql and
-# every database/*.py module — see this script's module docstring).
-# These lists are intentionally empty rather than fabricated; the
-# verify_functions()/verify_triggers() steps below report "0 expected,
-# 0 found" instead of silently skipping, so a future contributor adding
-# a real function/trigger has an obvious place to register it.
-REQUIRED_FUNCTIONS: List[str] = []
-REQUIRED_TRIGGERS: List[str] = []
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Base schema bootstrap (schema.sql)
+# Logging
 # ══════════════════════════════════════════════════════════════════════════
 
-def read_schema_sql() -> str:
-    path = os.path.join(_THIS_DIR, "schema.sql")
-    if not os.path.isfile(path):
-        raise MigrationError(
-            f"schema.sql not found at {path} — this file ships with ARGUS "
-            f"and is required for first-time installation. Re-download or "
-            f"re-clone the ARGUS repository."
+class Log:
+    """Minimal structured logging — no new dependency required."""
+
+    @staticmethod
+    def info(msg: str) -> None:
+        print(f"  [INFO]    {msg}")
+
+    @staticmethod
+    def warn(msg: str) -> None:
+        print(f"  [WARNING] {msg}")
+
+    @staticmethod
+    def ok(msg: str) -> None:
+        print(f"  [SUCCESS] {msg}")
+
+    @staticmethod
+    def error(msg: str) -> None:
+        print(f"  [ERROR]   {msg}")
+
+    @staticmethod
+    def step(n: int, total: int, title: str) -> None:
+        print(f"\n[{n}/{total}] {title}")
+        print("-" * 72)
+
+    @staticmethod
+    def check(label: str, passed: bool, detail: str = "") -> None:
+        mark = "\u2713" if passed else "\u2717"
+        suffix = f" ({detail})" if detail else ""
+        print(f"  {mark} {label}{suffix}")
+
+    @staticmethod
+    def progress(current: int, total: int, label: str) -> None:
+        width = 30
+        filled = int(width * current / total) if total else width
+        bar = "#" * filled + "-" * (width - filled)
+        end = "\n" if current == total else ""
+        print(f"\r  [{bar}] {current}/{total} {label}" + " " * 10, end=end, flush=True)
+
+
+class MigrationError(Exception):
+    """Raised to abort the run with a clear, already-logged reason."""
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Connection helpers
+# ══════════════════════════════════════════════════════════════════════════
+
+def _raw_connect(dbname: str, autocommit: bool = False):
+    conn = psycopg2.connect(
+        host=DB_CONFIG["host"],
+        port=DB_CONFIG["port"],
+        user=DB_CONFIG["user"],
+        password=DB_CONFIG["password"],
+        dbname=dbname,
+        connect_timeout=DB_CONFIG["connect_timeout"],
+    )
+    if autocommit:
+        conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+    return conn
+
+
+def classify_connection_error(exc: Exception) -> str:
+    """Turn a raw psycopg2/libpq error into an actionable message."""
+    text = str(exc).strip().lower()
+
+    if "password authentication failed" in text:
+        return (
+            f"Wrong password for role '{DB_CONFIG['user']}'. Check DB_PASSWORD in your "
+            f".env file against the actual PostgreSQL password for this role."
         )
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read()
+    if "role" in text and "does not exist" in text:
+        return (
+            f"Role '{DB_CONFIG['user']}' does not exist in PostgreSQL. Check DB_USER in "
+            f".env, or create the role: CREATE ROLE {DB_CONFIG['user']} WITH LOGIN "
+            f"PASSWORD '...';"
+        )
+    if "could not translate host name" in text or "name or service not known" in text:
+        return (
+            f"Cannot resolve host '{DB_CONFIG['host']}'. Check DB_HOST in .env — is it "
+            f"spelled correctly and reachable from this machine?"
+        )
+    if "connection refused" in text:
+        return (
+            f"Connection refused at {DB_CONFIG['host']}:{DB_CONFIG['port']}. Either "
+            f"PostgreSQL is not running, is not listening on that port, or DB_PORT in "
+            f".env is wrong (PostgreSQL's default is 5432)."
+        )
+    if "timeout expired" in text or "timed out" in text:
+        return (
+            f"Connection to {DB_CONFIG['host']}:{DB_CONFIG['port']} timed out. This "
+            f"usually means a firewall is blocking the port, or DB_HOST points at an "
+            f"address that isn't actually reachable from here."
+        )
+    if "no pg_hba.conf entry" in text:
+        return (
+            "PostgreSQL rejected the connection per its pg_hba.conf rules for this "
+            "host/user/database combination. An admin needs to add a matching entry "
+            "to pg_hba.conf and reload PostgreSQL."
+        )
+    if "database" in text and "does not exist" in text:
+        return f"Database '{DB_CONFIG['database']}' does not exist yet (this is handled automatically below)."
+
+    return f"Unrecognized connection failure: {exc}"
+
+
+def get_maintenance_connection():
+    """
+    Connect to a maintenance database (not the ARGUS database itself, which
+    may not exist yet) so we can check for / create the target database.
+    Tries 'postgres' first (present on virtually every install), then
+    falls back to 'template1'.
+    """
+    last_exc: Optional[Exception] = None
+    for maint_db in ("postgres", "template1"):
+        try:
+            conn = _raw_connect(maint_db, autocommit=True)
+            return conn
+        except psycopg2.OperationalError as exc:
+            last_exc = exc
+            # "database does not exist" just means this particular
+            # maintenance db isn't there — try the next one. Anything else
+            # (auth, host, port, timeout) will fail identically against
+            # every database, so surface it immediately.
+            if "does not exist" not in str(exc).lower():
+                break
+    raise MigrationError(classify_connection_error(last_exc))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Helper predicates — the vocabulary the rest of this script is built on
+# ══════════════════════════════════════════════════════════════════════════
+
+def database_exists(maint_conn, name: str) -> bool:
+    with maint_conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,))
+        return cur.fetchone() is not None
+
+
+def schema_exists(cur, name: str = "public") -> bool:
+    cur.execute("SELECT 1 FROM pg_namespace WHERE nspname = %s", (name,))
+    return cur.fetchone() is not None
+
+
+def table_exists(cur, table: str) -> bool:
+    cur.execute(
+        "SELECT 1 FROM information_schema.tables "
+        "WHERE table_schema = 'public' AND table_name = %s",
+        (table,),
+    )
+    return cur.fetchone() is not None
+
+
+def view_exists(cur, view: str) -> bool:
+    cur.execute(
+        "SELECT 1 FROM information_schema.views "
+        "WHERE table_schema = 'public' AND table_name = %s",
+        (view,),
+    )
+    return cur.fetchone() is not None
+
+
+def column_exists(cur, table: str, column: str) -> bool:
+    cur.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = %s AND column_name = %s",
+        (table, column),
+    )
+    return cur.fetchone() is not None
+
+
+def index_exists(cur, index_name: str) -> bool:
+    cur.execute(
+        "SELECT 1 FROM pg_class WHERE relname = %s AND relkind = 'i'",
+        (index_name,),
+    )
+    return cur.fetchone() is not None
+
+
+def function_exists(cur, name: str) -> bool:
+    cur.execute("SELECT 1 FROM pg_proc WHERE proname = %s", (name,))
+    return cur.fetchone() is not None
+
+
+def trigger_exists(cur, table: str, trigger_name: Optional[str] = None) -> bool:
+    if trigger_name:
+        cur.execute(
+            "SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid "
+            "WHERE c.relname = %s AND t.tgname = %s AND NOT t.tgisinternal",
+            (table, trigger_name),
+        )
+    else:
+        cur.execute(
+            "SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid "
+            "WHERE c.relname = %s AND NOT t.tgisinternal",
+            (table,),
+        )
+    return cur.fetchone() is not None
+
+
+def foreign_key_exists(cur, table: str, column: str) -> bool:
+    """
+    Checks by (table, column), not by constraint name — several of ARGUS's
+    foreign keys are declared inline in CREATE TABLE without an explicit
+    name, so Postgres auto-generates one. Matching on the actual key
+    column is the only way that's robust regardless of naming.
+    """
+    cur.execute(
+        """
+        SELECT 1
+        FROM pg_constraint c
+        JOIN pg_class t ON t.oid = c.conrelid
+        JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
+        WHERE c.contype = 'f' AND t.relname = %s AND a.attname = %s
+        LIMIT 1
+        """,
+        (table, column),
+    )
+    return cur.fetchone() is not None
+
+
+def check_constraint_exists(cur, table: str, column: str) -> bool:
+    cur.execute(
+        """
+        SELECT pg_get_constraintdef(c.oid)
+        FROM pg_constraint c
+        JOIN pg_class t ON t.oid = c.conrelid
+        WHERE c.contype = 'c' AND t.relname = %s
+        """,
+        (table,),
+    )
+    return any(column in (row[0] or "") for row in cur.fetchall())
+
+
+def unique_constraint_exists(cur, table: str, columns) -> bool:
+    cur.execute(
+        """
+        SELECT c.oid, array_agg(a.attname)
+        FROM pg_constraint c
+        JOIN pg_class t ON t.oid = c.conrelid
+        JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(c.conkey)
+        WHERE c.contype = 'u' AND t.relname = %s
+        GROUP BY c.oid
+        """,
+        (table,),
+    )
+    wanted = tuple(sorted(columns))
+    for _, cols in cur.fetchall():
+        if tuple(sorted(cols)) == wanted:
+            return True
+    return False
+
+
+def constraint_exists(cur, constraint_name: str) -> bool:
+    """Lookup by explicit name, for the constraints ARGUS does name."""
+    cur.execute("SELECT 1 FROM pg_constraint WHERE conname = %s", (constraint_name,))
+    return cur.fetchone() is not None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Step 6/7: schema.sql execution + verification
+# ══════════════════════════════════════════════════════════════════════════
+
+def create_database_if_missing(maint_conn, name: str, assume_yes: bool) -> bool:
+    """
+    Returns True if the database exists afterwards (whether it already did,
+    or was just created).
+    """
+    if database_exists(maint_conn, name):
+        Log.ok(f"Database '{name}' already exists.")
+        return True
+
+    Log.warn(f"Database '{name}' does not exist.")
+    if not assume_yes:
+        try:
+            answer = input(f"  Create database '{name}' now? [Y/n] ").strip().lower()
+        except EOFError:
+            answer = "y"
+        if answer not in ("", "y", "yes"):
+            Log.error("Aborted by user.")
+            return False
+
+    try:
+        with maint_conn.cursor() as cur:
+            cur.execute(f'CREATE DATABASE "{name}" OWNER "{DB_CONFIG["user"]}"')
+        Log.ok(f"Created database '{name}', owned by '{DB_CONFIG['user']}'.")
+        return True
+    except psycopg2.errors.InsufficientPrivilege:
+        Log.error(
+            f"Role '{DB_CONFIG['user']}' does not have CREATEDB privileges. "
+            f"Ask a PostgreSQL admin to run:\n"
+            f"    CREATE DATABASE {name} OWNER {DB_CONFIG['user']};\n"
+            f"then re-run this script."
+        )
+        return False
+    except Exception as exc:
+        Log.error(f"Failed to create database '{name}': {exc}")
+        return False
 
 
 def execute_schema(conn) -> None:
     """
-    Step 6: execute the full schema.sql bootstrap file. Every statement
-    in schema.sql is itself written idempotently (CREATE TABLE IF NOT
-    EXISTS, CREATE INDEX IF NOT EXISTS, DO $$ ... IF NOT EXISTS $$ blocks,
-    CREATE OR REPLACE VIEW), so this is safe to run against an empty
-    database, a partially-populated one, or a fully up-to-date one.
-
-    Runs as a single transaction: if any statement in schema.sql fails,
-    the entire file's effects are rolled back rather than leaving the
-    database with, say, half its base tables created and the rest
-    missing.
+    Execute schema.sql in full. schema.sql is written entirely with
+    CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT EXISTS / DO $$ ... IF
+    NOT EXISTS $$ guards, so it is always safe to run — on a brand-new
+    database it creates everything from scratch; on an existing one, every
+    statement is a no-op except the ones repairing genuinely missing
+    pieces.
     """
-    sql_text = read_schema_sql()
+    if not os.path.isfile(SCHEMA_FILE):
+        raise MigrationError(f"schema.sql not found at {SCHEMA_FILE}")
+
+    with open(SCHEMA_FILE, "r", encoding="utf-8") as fh:
+        sql = fh.read()
+
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+        Log.ok("schema.sql applied successfully.")
+    except Exception as exc:
+        conn.rollback()
+        raise MigrationError(f"Failed to execute schema.sql: {exc}") from exc
+
+
+def verify_schema(cur, tables) -> list:
+    """Returns the list of tables from `tables` that are still missing."""
+    return [t for t in tables if not table_exists(cur, t)]
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Step 4: schema_version bookkeeping table
+# ══════════════════════════════════════════════════════════════════════════
+
+SCHEMA_VERSION_DDL = """
+CREATE TABLE IF NOT EXISTS schema_version (
+    id             SERIAL PRIMARY KEY,
+    version        TEXT        NOT NULL,
+    migration_name TEXT        NOT NULL UNIQUE,
+    applied_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    duration_ms    INTEGER,
+    checksum       TEXT,
+    status         TEXT        NOT NULL DEFAULT 'success'
+                   CHECK (status IN ('success', 'failed'))
+)
+"""
+
+
+def ensure_schema_version_table(conn) -> None:
     with conn:
         with conn.cursor() as cur:
-            cur.execute(sql_text)
+            cur.execute(SCHEMA_VERSION_DDL)
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Incremental migrations
+# Step 8: incremental migrations
 #
-# This is the exact SQL from the previous version of ARGUS's migrate.py,
-# restructured into versioned, checksummed, individually-tracked units —
-# not rewritten or reworded. Every one of these was already idempotent
-# (IF NOT EXISTS / ON CONFLICT / DO $$ IF NOT EXISTS $$ guards) in the
-# original, which is exactly what makes it safe to also run this list
-# against a completely fresh database that has only just had schema.sql
-# applied to it: base tables (assets/cves/matches/alerts/reports/users)
-# already exist by the time this list runs, and everything below either
-# adds a column to one of those, or creates a new table that references
-# them.
+# Every entry is (name, sql). `name` is the idempotency key stored in
+# schema_version.migration_name — it must never change once released, or a
+# database that already applied it will try to apply it again under a new
+# name. Each migration is executed in its own transaction: a failure rolls
+# back only that migration, not any migration applied earlier in this run.
 # ══════════════════════════════════════════════════════════════════════════
 
-@dataclass
-class Migration:
-    version: int
-    name: str
-    sql: str
-    category: str = "core"
-    description: str = ""
-    depends_on: Tuple[str, ...] = ()
-    rollback_strategy: str = (
-        "Additive only (ADD COLUMN / CREATE TABLE / CREATE INDEX, all "
-        "guarded with IF NOT EXISTS). Not auto-reversible by design — "
-        "dropping a column or table can destroy operator data. To revert "
-        "manually, DROP the specific object this migration created; there "
-        "is no automated `down` migration."
-    )
+MIGRATIONS = [
+    ("assets.type column",
+     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'Unknown'"),
+    ("assets.last_scan column",
+     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS last_scan TIMESTAMPTZ"),
+    ("assets.search_keyword column",
+     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS search_keyword TEXT"),
+    ("cves.severity column",
+     "ALTER TABLE cves ADD COLUMN IF NOT EXISTS severity TEXT"),
+    ("cves.epss column",
+     "ALTER TABLE cves ADD COLUMN IF NOT EXISTS epss NUMERIC(8,6)"),
+    ("cves.epss_percentile column",
+     "ALTER TABLE cves ADD COLUMN IF NOT EXISTS epss_percentile NUMERIC(8,6)"),
+    # schema.sql's CREATE TABLE cves defines created_at, but on a database
+    # whose cves table pre-dates that column, CREATE TABLE IF NOT EXISTS is
+    # a no-op against the already-existing table, so it never gets added.
+    # Without this repair, any query selecting created_at from cves (e.g.
+    # database/cves.py's get_cve()) fails with 'column "created_at" does
+    # not exist.'
+    ("cves.created_at column",
+     "ALTER TABLE cves ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
+    ("matches UNIQUE (asset_id, cve_id) constraint",
+     """
+     DO $$
+     BEGIN
+         IF NOT EXISTS (
+             SELECT 1 FROM pg_constraint WHERE conname = 'matches_asset_id_cve_id_key'
+         ) THEN
+             DELETE FROM matches a USING matches b
+             WHERE a.id > b.id AND a.asset_id = b.asset_id AND a.cve_id = b.cve_id;
+             ALTER TABLE matches ADD CONSTRAINT matches_asset_id_cve_id_key UNIQUE (asset_id, cve_id);
+         END IF;
+     END $$
+     """),
+    ("matches.first_seen column",
+     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS first_seen TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
 
-    @property
-    def checksum(self) -> str:
-        return checksum_of(self.sql)
+    # ── Phase 2: Remediation tracking ────────────────────────────────────
+    ("matches.status column",
+     """
+     DO $$
+     BEGIN
+         IF NOT EXISTS (
+             SELECT 1 FROM information_schema.columns
+             WHERE table_name='matches' AND column_name='status'
+         ) THEN
+             ALTER TABLE matches ADD COLUMN status TEXT NOT NULL DEFAULT 'Open'
+                 CHECK (status IN ('Open','In Progress','Resolved','Accepted Risk','False Positive'));
+         END IF;
+     END $$
+     """),
+    ("matches.resolved_at column",
+     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ"),
+    ("matches.due_date column",
+     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS due_date DATE"),
+    ("matches.patched column",
+     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS patched BOOLEAN NOT NULL DEFAULT FALSE"),
 
+    # ── Phase 2: Ownership & Assignment ──────────────────────────────────
+    ("matches.assigned_to column",
+     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS assigned_to TEXT"),
+    ("matches.assigned_team column",
+     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS assigned_team TEXT"),
 
-MIGRATIONS: List[Migration] = [
-    Migration(
-        1, "assets.type column", "core",
-        sql="ALTER TABLE assets ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'Unknown'",
-        description="Adds the device-category column to assets for pre-existing databases created before it existed.",
-        depends_on=("base_schema:assets",),
-    ),
-    Migration(
-        2, "assets.last_scan column", "core",
-        sql="ALTER TABLE assets ADD COLUMN IF NOT EXISTS last_scan TIMESTAMPTZ",
-        description="Timestamp of the most recent scan of this asset (database/assets.py::update_last_scan).",
-        depends_on=("base_schema:assets",),
-    ),
-    Migration(
-        3, "assets.search_keyword column", "core",
-        sql="ALTER TABLE assets ADD COLUMN IF NOT EXISTS search_keyword TEXT",
-        description="NVD search keyword override used by the scanner (defaults to 'vendor product' if unset).",
-        depends_on=("base_schema:assets",),
-    ),
-    Migration(
-        4, "cves.severity column", "core",
-        sql="ALTER TABLE cves ADD COLUMN IF NOT EXISTS severity TEXT",
-        description="Severity label (LOW/MEDIUM/HIGH/CRITICAL) derived from CVSS.",
-        depends_on=("base_schema:cves",),
-    ),
-    Migration(
-        5, "cves.epss column", "core",
-        sql="ALTER TABLE cves ADD COLUMN IF NOT EXISTS epss NUMERIC(8,6)",
-        description="FIRST.org EPSS exploitation-probability score.",
-        depends_on=("base_schema:cves",),
-    ),
-    Migration(
-        6, "cves.epss_percentile column", "core",
-        sql="ALTER TABLE cves ADD COLUMN IF NOT EXISTS epss_percentile NUMERIC(8,6)",
-        description="EPSS percentile ranking, stored alongside the raw score.",
-        depends_on=("base_schema:cves",),
-    ),
-    Migration(
-        7, "cves.created_at column", "core",
-        sql="ALTER TABLE cves ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
-        description=(
-            "schema.sql's CREATE TABLE cves defines created_at, but a "
-            "live database whose cves table pre-dates that column keeps "
-            "missing it forever under CREATE TABLE IF NOT EXISTS alone — "
-            "database/cves.py::get_cve() selects this column directly."
-        ),
-        depends_on=("base_schema:cves",),
-    ),
-    Migration(
-        8, "matches UNIQUE (asset_id, cve_id) constraint", "core",
-        sql="""
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_constraint WHERE conname = 'matches_asset_id_cve_id_key'
-            ) THEN
-                DELETE FROM matches a USING matches b
-                WHERE a.id > b.id AND a.asset_id = b.asset_id AND a.cve_id = b.cve_id;
-                ALTER TABLE matches ADD CONSTRAINT matches_asset_id_cve_id_key UNIQUE (asset_id, cve_id);
-            END IF;
-        END $$
-        """,
-        description=(
-            "Ensures one row per (asset, CVE) pair, deleting any duplicate "
-            "rows accumulated before this constraint existed (keeping the "
-            "lowest id of each duplicate group) so the ADD CONSTRAINT can "
-            "succeed."
-        ),
-        depends_on=("base_schema:matches",),
-    ),
-    Migration(
-        9, "matches.first_seen column", "core",
-        sql="ALTER TABLE matches ADD COLUMN IF NOT EXISTS first_seen TIMESTAMPTZ NOT NULL DEFAULT NOW()",
-        description="When a finding was first discovered — used for SLA due-date backfill and 'days open' reporting.",
-        depends_on=("base_schema:matches",),
-    ),
-    Migration(
-        10, "matches.status column", "phase2",
-        sql="""
-        ALTER TABLE matches
-        ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'Open'
-            CHECK (status IN ('Open','In Progress','Resolved','Accepted Risk','False Positive'))
-        """,
-        description="Remediation workflow status for a finding.",
-        depends_on=("base_schema:matches",),
-    ),
-    Migration(
-        11, "matches.resolved_at column", "phase2",
-        sql="ALTER TABLE matches ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ",
-        description="Stamped when status transitions to 'Resolved'; cleared otherwise.",
-        depends_on=("matches.status column",),
-    ),
-    Migration(
-        12, "matches.due_date column", "phase2",
-        sql="ALTER TABLE matches ADD COLUMN IF NOT EXISTS due_date DATE",
-        description="Auto-calculated SLA compliance deadline, derived from CVSS at insert time.",
-        depends_on=("base_schema:matches",),
-    ),
-    Migration(
-        13, "matches.patched column", "phase2",
-        sql="ALTER TABLE matches ADD COLUMN IF NOT EXISTS patched BOOLEAN NOT NULL DEFAULT FALSE",
-        description="Whether this finding has been patched (independent of workflow status).",
-        depends_on=("base_schema:matches",),
-    ),
-    Migration(
-        14, "matches.assigned_to column", "phase2",
-        sql="ALTER TABLE matches ADD COLUMN IF NOT EXISTS assigned_to TEXT",
-        description="Individual owner assigned to remediate this finding.",
-        depends_on=("base_schema:matches",),
-    ),
-    Migration(
-        15, "matches.assigned_team column", "phase2",
-        sql="ALTER TABLE matches ADD COLUMN IF NOT EXISTS assigned_team TEXT",
-        description="Team assigned to remediate this finding.",
-        depends_on=("base_schema:matches",),
-    ),
-    Migration(
-        16, "backfill matches.due_date from cvss", "phase2-data",
-        sql="""
-        UPDATE matches m
-        SET due_date = CASE
-            WHEN c.cvss >= 9.0 THEN m.first_seen::date + INTERVAL '7 days'
-            WHEN c.cvss >= 7.0 THEN m.first_seen::date + INTERVAL '30 days'
-            WHEN c.cvss >= 4.0 THEN m.first_seen::date + INTERVAL '60 days'
-            ELSE                     m.first_seen::date + INTERVAL '90 days'
-        END
-        FROM cves c
-        WHERE m.cve_id = c.cve_id
-          AND m.due_date IS NULL
-        """,
-        description="One-time backfill of due_date for findings that existed before the column did.",
-        depends_on=("matches.due_date column", "matches.first_seen column"),
-    ),
-    Migration(
-        17, "alerts table", "system",
-        sql="""
-        CREATE TABLE IF NOT EXISTS alerts (
-            id       SERIAL PRIMARY KEY,
-            asset_id INTEGER REFERENCES assets(id) ON DELETE SET NULL,
-            message  TEXT        NOT NULL,
-            sent_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-        """,
-        description="Historical record of Telegram alerts sent (database/matches.py::save_alert).",
-        depends_on=("base_schema:assets",),
-    ),
-    Migration(
-        18, "reports table", "system",
-        sql="""
-        CREATE TABLE IF NOT EXISTS reports (
-            id           SERIAL PRIMARY KEY,
-            report_type  VARCHAR(20),
-            generated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-            file_path    TEXT      NOT NULL
-        )
-        """,
-        description="Generated PDF report metadata (database/reports.py).",
-    ),
-    Migration(
-        19, "users table", "system",
-        sql="""
-        CREATE TABLE IF NOT EXISTS users (
-            id            SERIAL PRIMARY KEY,
-            username      TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            role          TEXT NOT NULL DEFAULT 'viewer',
-            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-        """,
-        description="Self-registered dashboard accounts (in addition to the in-memory admin/viewer accounts).",
-    ),
-    Migration(
-        20, "index matches(asset_id)", "index",
-        sql="CREATE INDEX IF NOT EXISTS idx_matches_asset_id ON matches(asset_id)",
-        depends_on=("base_schema:matches",),
-    ),
-    Migration(
-        21, "index matches(cve_id)", "index",
-        sql="CREATE INDEX IF NOT EXISTS idx_matches_cve_id ON matches(cve_id)",
-        depends_on=("base_schema:matches",),
-    ),
-    Migration(
-        22, "index matches(risk_score)", "index",
-        sql="CREATE INDEX IF NOT EXISTS idx_matches_risk ON matches(risk_score DESC)",
-        depends_on=("base_schema:matches",),
-    ),
-    Migration(
-        23, "index matches(status)", "index",
-        sql="CREATE INDEX IF NOT EXISTS idx_matches_status ON matches(status)",
-        depends_on=("matches.status column",),
-    ),
-    Migration(
-        24, "index matches(due_date)", "index",
-        sql="CREATE INDEX IF NOT EXISTS idx_matches_due_date ON matches(due_date)",
-        depends_on=("matches.due_date column",),
-    ),
-    Migration(
-        25, "index assets(type)", "index",
-        sql="CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(type)",
-        depends_on=("assets.type column",),
-    ),
-    Migration(
-        26, "index cves(kev) partial", "index",
-        sql="CREATE INDEX IF NOT EXISTS idx_cves_kev ON cves(kev) WHERE kev = TRUE",
-        description=(
-            "cves.kev is filtered on heavily (the /findings KEV filter, "
-            "dashboard KEV counts) but had no supporting index, forcing a "
-            "sequential scan of the entire cves table on every such query."
-        ),
-        depends_on=("base_schema:cves",),
-    ),
-    Migration(
-        27, "index cves(cvss)", "index",
-        sql="CREATE INDEX IF NOT EXISTS idx_cves_cvss ON cves(cvss DESC)",
-        description="Supports CVSS-sorted views (/cves live search sort).",
-        depends_on=("base_schema:cves",),
-    ),
-    Migration(
-        28, "back-fill cves.severity from cvss", "phase2-data",
-        sql="""
-        UPDATE cves SET severity =
-            CASE
-                WHEN cvss >= 9.0 THEN 'CRITICAL'
-                WHEN cvss >= 7.0 THEN 'HIGH'
-                WHEN cvss >= 4.0 THEN 'MEDIUM'
-                WHEN cvss >  0   THEN 'LOW'
-                ELSE 'NONE'
-            END
-        WHERE severity IS NULL
-        """,
-        depends_on=("cves.severity column",),
-    ),
-    Migration(
-        29, "back-fill assets.search_keyword", "phase2-data",
-        sql="UPDATE assets SET search_keyword = vendor || ' ' || product WHERE search_keyword IS NULL",
-        depends_on=("assets.search_keyword column",),
-    ),
-    Migration(
-        30, "ai_conversations table", "ai",
-        sql="""
-        CREATE TABLE IF NOT EXISTS ai_conversations (
-            id          SERIAL PRIMARY KEY,
-            username    TEXT        NOT NULL,
-            title       TEXT        NOT NULL DEFAULT 'New conversation',
-            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            archived    BOOLEAN     NOT NULL DEFAULT FALSE
-        )
-        """,
-        description="AI Security Copilot conversation metadata (database/conversations.py).",
-    ),
-    Migration(
-        31, "repair ai_conversations.username column", "ai",
-        sql="ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS username TEXT",
-        description=(
-            "Repairs deployments where an earlier ad-hoc ai_conversations "
-            "table (user_id INTEGER instead of username TEXT) pre-dates "
-            "this shape, so CREATE TABLE IF NOT EXISTS above silently "
-            "no-oped against it."
-        ),
-        depends_on=("ai_conversations table",),
-    ),
-    Migration(
-        32, "repair ai_conversations.updated_at column", "ai",
-        sql="ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
-        depends_on=("ai_conversations table",),
-    ),
-    Migration(
-        33, "repair ai_conversations.archived column", "ai",
-        sql="ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE",
-        depends_on=("ai_conversations table",),
-    ),
-    Migration(
-        34, "backfill ai_conversations.title default", "ai",
-        sql="ALTER TABLE ai_conversations ALTER COLUMN title SET DEFAULT 'New conversation'",
-        depends_on=("ai_conversations table",),
-    ),
-    Migration(
-        35, "ai_messages table", "ai",
-        sql="""
-        CREATE TABLE IF NOT EXISTS ai_messages (
-            id              SERIAL PRIMARY KEY,
-            conversation_id INTEGER     NOT NULL REFERENCES ai_conversations(id) ON DELETE CASCADE,
-            role            TEXT        NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
-            content         TEXT        NOT NULL,
-            tokens          INTEGER     DEFAULT 0,
-            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-        """,
-        description="Individual chat turns within an AI conversation (database/conversations.py).",
-        depends_on=("ai_conversations table",),
-    ),
-    Migration(
-        36, "repair ai_messages.tokens column", "ai",
-        sql="ALTER TABLE ai_messages ADD COLUMN IF NOT EXISTS tokens INTEGER DEFAULT 0",
-        depends_on=("ai_messages table",),
-    ),
-    Migration(
-        37, "delete orphaned ai_messages with no matching conversation", "ai-repair",
-        sql="DELETE FROM ai_messages WHERE conversation_id NOT IN (SELECT id FROM ai_conversations)",
-        description=(
-            "CRITICAL REPAIR: ai_messages.conversation_id was supposed to "
-            "reference ai_conversations(id) ON DELETE CASCADE, but because "
-            "ai_messages already existed (in a different shape) when this "
-            "table was first defined, CREATE TABLE IF NOT EXISTS silently "
-            "skipped that FK along with everything else, so deleting a "
-            "conversation never cascaded to its messages — they became "
-            "permanently orphaned. This deletes existing orphans (Postgres "
-            "refuses to add a FK while violating rows exist) before the "
-            "next migration adds the FK for real."
-        ),
-        depends_on=("ai_messages table",),
-    ),
-    Migration(
-        38, "add missing ai_messages -> ai_conversations foreign key", "ai-repair",
-        sql="""
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_constraint WHERE conname = 'ai_messages_conversation_id_fkey'
-            ) THEN
-                ALTER TABLE ai_messages
-                    ADD CONSTRAINT ai_messages_conversation_id_fkey
-                    FOREIGN KEY (conversation_id)
-                    REFERENCES ai_conversations(id)
-                    ON DELETE CASCADE;
-            END IF;
-        END $$
-        """,
-        depends_on=("delete orphaned ai_messages with no matching conversation",),
-    ),
-    Migration(
-        39, "index ai_conversations(username)", "index",
-        sql="CREATE INDEX IF NOT EXISTS idx_ai_conversations_username ON ai_conversations(username, updated_at DESC)",
-        depends_on=("ai_conversations table",),
-    ),
-    Migration(
-        40, "index ai_messages(conversation_id)", "index",
-        sql="CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation ON ai_messages(conversation_id, created_at)",
-        depends_on=("ai_messages table",),
-    ),
-    Migration(
-        41, "cve_ai_analysis table", "ai",
-        sql="""
-        CREATE TABLE IF NOT EXISTS cve_ai_analysis (
-            cve_id              TEXT        PRIMARY KEY REFERENCES cves(cve_id) ON DELETE CASCADE,
-            summary             TEXT,
-            explanation         TEXT,
-            guidance            TEXT,
-            attack_scenario     TEXT,
-            business_impact     TEXT,
-            technical_impact    TEXT,
-            recommended_actions TEXT,
-            model_used          TEXT,
-            description_hash    TEXT,
-            status              TEXT        NOT NULL DEFAULT 'pending',
-            retry_count         INTEGER     NOT NULL DEFAULT 0,
-            error_message       TEXT,
-            analyzed_at         TIMESTAMPTZ,
-            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-        """,
-        description="Cached AI-generated CVE analysis (database/cve_analysis.py).",
-        depends_on=("base_schema:cves",),
-    ),
-    Migration(
-        42, "repair cve_ai_analysis.technical_impact column", "ai",
-        sql="ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS technical_impact TEXT",
-        depends_on=("cve_ai_analysis table",),
-    ),
-    Migration(
-        43, "repair cve_ai_analysis.recommended_actions column", "ai",
-        sql="ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS recommended_actions TEXT",
-        depends_on=("cve_ai_analysis table",),
-    ),
-    Migration(
-        44, "repair cve_ai_analysis.description_hash column", "ai",
-        sql="ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS description_hash TEXT",
-        depends_on=("cve_ai_analysis table",),
-    ),
-    Migration(
-        45, "repair cve_ai_analysis.status column", "ai",
-        sql="ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending'",
-        depends_on=("cve_ai_analysis table",),
-    ),
-    Migration(
-        46, "repair cve_ai_analysis.retry_count column", "ai",
-        sql="ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0",
-        depends_on=("cve_ai_analysis table",),
-    ),
-    Migration(
-        47, "repair cve_ai_analysis.error_message column", "ai",
-        sql="ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS error_message TEXT",
-        depends_on=("cve_ai_analysis table",),
-    ),
-    Migration(
-        48, "repair cve_ai_analysis.created_at column", "ai",
-        sql="ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
-        depends_on=("cve_ai_analysis table",),
-    ),
-    Migration(
-        49, "repair cve_ai_analysis.updated_at column", "ai",
-        sql="ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
-        depends_on=("cve_ai_analysis table",),
-    ),
-    Migration(
-        50, "add cve_ai_analysis.status CHECK constraint", "ai",
-        sql="""
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_constraint WHERE conname = 'cve_ai_analysis_status_check'
-            ) THEN
-                ALTER TABLE cve_ai_analysis
-                    ADD CONSTRAINT cve_ai_analysis_status_check
-                    CHECK (status IN ('pending', 'processing', 'complete', 'failed'));
-            END IF;
-        END $$
-        """,
-        description=(
-            "Added separately from the column definition (rather than an "
-            "inline CHECK) because ADD COLUMN with an inline CHECK fails "
-            "on tables that already have rows violating it; this guards "
-            "the same way even though there are no rows yet on a fresh install."
-        ),
-        depends_on=("repair cve_ai_analysis.status column",),
-    ),
-    Migration(
-        51, "index cve_ai_analysis(status)", "index",
-        sql="CREATE INDEX IF NOT EXISTS idx_cve_ai_analysis_status ON cve_ai_analysis(status)",
-        depends_on=("cve_ai_analysis table",),
-    ),
-    Migration(
-        52, "risk_snapshots table", "ai",
-        sql="""
-        CREATE TABLE IF NOT EXISTS risk_snapshots (
-            id                   SERIAL PRIMARY KEY,
-            snapshot_date        DATE        NOT NULL UNIQUE,
-            total_findings       INTEGER     NOT NULL DEFAULT 0,
-            open_findings        INTEGER     NOT NULL DEFAULT 0,
-            resolved_findings    INTEGER     NOT NULL DEFAULT 0,
-            kev_findings         INTEGER     NOT NULL DEFAULT 0,
-            overdue_findings     INTEGER     NOT NULL DEFAULT 0,
-            critical_findings    INTEGER     NOT NULL DEFAULT 0,
-            high_findings        INTEGER     NOT NULL DEFAULT 0,
-            avg_risk_score       NUMERIC,
-            max_risk_score       INTEGER,
-            total_assets         INTEGER     NOT NULL DEFAULT 0,
-            created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-        """,
-        description=(
-            "One row per day with aggregate counts, written by the daily "
-            "APScheduler job (jobs/daily_scan.py), enabling week-over-week "
-            "trend comparisons that `matches` alone (current state only) "
-            "cannot answer."
-        ),
-    ),
-    Migration(
-        53, "index risk_snapshots(snapshot_date)", "index",
-        sql="CREATE INDEX IF NOT EXISTS idx_risk_snapshots_date ON risk_snapshots(snapshot_date DESC)",
-        depends_on=("risk_snapshots table",),
-    ),
-    Migration(
-        54, "ai_response_cache table", "ai",
-        sql="""
-        CREATE TABLE IF NOT EXISTS ai_response_cache (
-            cache_key   TEXT        PRIMARY KEY,
-            question    TEXT        NOT NULL,
-            response    TEXT        NOT NULL,
-            tokens      INTEGER     NOT NULL DEFAULT 0,
-            hit_count   INTEGER     NOT NULL DEFAULT 0,
-            created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            expires_at  TIMESTAMPTZ NOT NULL
-        )
-        """,
-        description=(
-            "Keyed on a hash of (normalized question + ARGUS context), not "
-            "just the raw question, so the cache auto-invalidates whenever "
-            "the underlying ARGUS data changes, with a short TTL enforced "
-            "as a safety net against staleness."
-        ),
-    ),
-    Migration(
-        55, "index ai_response_cache(expires_at)", "index",
-        sql="CREATE INDEX IF NOT EXISTS idx_ai_response_cache_expires ON ai_response_cache(expires_at)",
-        depends_on=("ai_response_cache table",),
-    ),
-    Migration(
-        56, "assets.city column", "geo",
-        sql="ALTER TABLE assets ADD COLUMN IF NOT EXISTS city VARCHAR(120)",
-        description=(
-            "City Exposure Overview feature. Nullable on purpose — existing "
-            "assets have no city/country data and must keep working "
-            "unmodified; NULL/blank is the documented 'unassigned asset' case."
-        ),
-        depends_on=("base_schema:assets",),
-    ),
-    Migration(
-        57, "assets.country_code column", "geo",
-        sql="ALTER TABLE assets ADD COLUMN IF NOT EXISTS country_code CHAR(2)",
-        depends_on=("base_schema:assets",),
-    ),
-    Migration(
-        58, "index assets(country_code, city)", "index",
-        sql="CREATE INDEX IF NOT EXISTS idx_assets_city_country ON assets (country_code, city)",
-        depends_on=("assets.city column", "assets.country_code column"),
-    ),
-    Migration(
-        59, "assets.exposure column", "metadata",
-        sql="ALTER TABLE assets ADD COLUMN IF NOT EXISTS exposure TEXT NOT NULL DEFAULT 'Internal'",
-        description=(
-            "Whether the asset is reachable from outside the organization's "
-            "network. Defaults to 'Internal' (the safer pre-select) rather "
-            "than NULL — an admin must actively mark something 'External'."
-        ),
-        depends_on=("base_schema:assets",),
-    ),
-    Migration(
-        60, "assets.exposure check constraint", "metadata",
-        sql="""
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM information_schema.table_constraints
-                WHERE table_name = 'assets' AND constraint_name = 'assets_exposure_check'
-            ) THEN
-                ALTER TABLE assets ADD CONSTRAINT assets_exposure_check
-                    CHECK (exposure IN ('Internal', 'External'));
-            END IF;
-        END $$;
-        """,
-        depends_on=("assets.exposure column",),
-    ),
-    Migration(
-        61, "assets.function column", "metadata",
-        sql="ALTER TABLE assets ADD COLUMN IF NOT EXISTS function TEXT",
-        description=(
-            "Network role (Gateway/Endpoint/etc.), independent of device "
-            "type. Stays nullable — 'unclassified role' is a legitimate, "
-            "common state, unlike exposure."
-        ),
-        depends_on=("base_schema:assets",),
-    ),
-    Migration(
-        62, "index assets(exposure)", "index",
-        sql="CREATE INDEX IF NOT EXISTS idx_assets_exposure ON assets (exposure)",
-        depends_on=("assets.exposure column",),
-    ),
-    Migration(
-        63, "index assets(function)", "index",
-        sql="CREATE INDEX IF NOT EXISTS idx_assets_function ON assets (function)",
-        depends_on=("assets.function column",),
-    ),
-    Migration(
-        64, "matches.planned_patch_date column", "patch-planning",
-        sql="ALTER TABLE matches ADD COLUMN IF NOT EXISTS planned_patch_date DATE",
-        description=(
-            "The analyst's own scheduling decision for when a patch will "
-            "actually be applied — deliberately separate from due_date "
-            "(the auto-calculated SLA deadline), never auto-computed or "
-            "overwritten by ARGUS."
-        ),
-        depends_on=("base_schema:matches",),
-    ),
-    Migration(
-        65, "matches.patch_notes column", "patch-planning",
-        sql="ALTER TABLE matches ADD COLUMN IF NOT EXISTS patch_notes TEXT",
-        depends_on=("base_schema:matches",),
-    ),
-    Migration(
-        66, "index matches(planned_patch_date)", "index",
-        sql="CREATE INDEX IF NOT EXISTS idx_matches_planned_patch_date ON matches (planned_patch_date)",
-        depends_on=("matches.planned_patch_date column",),
-    ),
+    # ── Backfill SLA due_date for existing Open findings ─────────────────
+    ("backfill matches.due_date from cvss",
+     """
+     UPDATE matches m
+     SET due_date = CASE
+         WHEN c.cvss >= 9.0 THEN m.first_seen::date + INTERVAL '7 days'
+         WHEN c.cvss >= 7.0 THEN m.first_seen::date + INTERVAL '30 days'
+         WHEN c.cvss >= 4.0 THEN m.first_seen::date + INTERVAL '60 days'
+         ELSE                     m.first_seen::date + INTERVAL '90 days'
+     END
+     FROM cves c
+     WHERE m.cve_id = c.cve_id
+       AND m.due_date IS NULL
+     """),
+
+    # ── System tables ─────────────────────────────────────────────────────
+    ("alerts table",
+     """
+     CREATE TABLE IF NOT EXISTS alerts (
+         id       SERIAL PRIMARY KEY,
+         asset_id INTEGER REFERENCES assets(id) ON DELETE SET NULL,
+         message  TEXT        NOT NULL,
+         sent_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+     )
+     """),
+    ("reports table",
+     """
+     CREATE TABLE IF NOT EXISTS reports (
+         id           SERIAL PRIMARY KEY,
+         report_type  VARCHAR(20),
+         generated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+         file_path    TEXT      NOT NULL
+     )
+     """),
+    ("users table",
+     """
+     CREATE TABLE IF NOT EXISTS users (
+         id            SERIAL PRIMARY KEY,
+         username      TEXT UNIQUE NOT NULL,
+         password_hash TEXT NOT NULL,
+         role          TEXT NOT NULL DEFAULT 'viewer',
+         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+     )
+     """),
+
+    # ── Indexes ───────────────────────────────────────────────────────────
+    ("index matches(asset_id)",   "CREATE INDEX IF NOT EXISTS idx_matches_asset_id ON matches(asset_id)"),
+    ("index matches(cve_id)",     "CREATE INDEX IF NOT EXISTS idx_matches_cve_id ON matches(cve_id)"),
+    ("index matches(risk_score)", "CREATE INDEX IF NOT EXISTS idx_matches_risk ON matches(risk_score DESC)"),
+    ("index matches(status)",     "CREATE INDEX IF NOT EXISTS idx_matches_status ON matches(status)"),
+    ("index matches(due_date)",   "CREATE INDEX IF NOT EXISTS idx_matches_due_date ON matches(due_date)"),
+    # Composite index used by dashboard queries that filter matches by
+    # asset AND status together. Present in schema.sql's Phase 2 block but
+    # missing from earlier versions of this migration list, so a database
+    # that was only ever migrated (never had schema.sql applied fresh)
+    # would silently never get it.
+    ("index matches(asset_id, status) composite",
+     "CREATE INDEX IF NOT EXISTS idx_matches_asset_cve ON matches(asset_id, status)"),
+    ("index assets(type)",        "CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(type)"),
+    ("index cves(kev) partial",   "CREATE INDEX IF NOT EXISTS idx_cves_kev ON cves(kev) WHERE kev = TRUE"),
+    ("index cves(cvss)",          "CREATE INDEX IF NOT EXISTS idx_cves_cvss ON cves(cvss DESC)"),
+
+    # ── Back-fill data ────────────────────────────────────────────────────
+    ("back-fill cves.severity from cvss",
+     """
+     UPDATE cves SET severity =
+         CASE
+             WHEN cvss >= 9.0 THEN 'CRITICAL'
+             WHEN cvss >= 7.0 THEN 'HIGH'
+             WHEN cvss >= 4.0 THEN 'MEDIUM'
+             WHEN cvss >  0   THEN 'LOW'
+             ELSE 'NONE'
+         END
+     WHERE severity IS NULL
+     """),
+    ("back-fill assets.search_keyword",
+     "UPDATE assets SET search_keyword = vendor || ' ' || product WHERE search_keyword IS NULL"),
+
+    # ── Phase 6: AI Security Copilot — persistent conversations ──────────
+    # NOTE: schema.sql never defines these tables at all — they only exist
+    # via this migration list (and the mirrored _ensure_schema() in
+    # dashboard/app.py). An earlier ad-hoc setup created ai_conversations /
+    # ai_messages with a different shape (user_id INTEGER instead of
+    # username TEXT, no updated_at/archived/tokens columns).
+    # CREATE TABLE IF NOT EXISTS silently no-ops against that pre-existing
+    # table, so the ALTER TABLE ... ADD COLUMN IF NOT EXISTS statements
+    # below are what actually repair a live database.
+    ("ai_conversations table",
+     """
+     CREATE TABLE IF NOT EXISTS ai_conversations (
+         id          SERIAL PRIMARY KEY,
+         username    TEXT        NOT NULL,
+         title       TEXT        NOT NULL DEFAULT 'New conversation',
+         created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         archived    BOOLEAN     NOT NULL DEFAULT FALSE
+     )
+     """),
+    ("repair ai_conversations.username column",
+     "ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS username TEXT"),
+    ("repair ai_conversations.updated_at column",
+     "ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
+    ("repair ai_conversations.archived column",
+     "ALTER TABLE ai_conversations ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("backfill ai_conversations.title default",
+     "ALTER TABLE ai_conversations ALTER COLUMN title SET DEFAULT 'New conversation'"),
+    ("ai_messages table",
+     """
+     CREATE TABLE IF NOT EXISTS ai_messages (
+         id              SERIAL PRIMARY KEY,
+         conversation_id INTEGER     NOT NULL REFERENCES ai_conversations(id) ON DELETE CASCADE,
+         role            TEXT        NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+         content         TEXT        NOT NULL,
+         tokens          INTEGER     DEFAULT 0,
+         created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+     )
+     """),
+    ("repair ai_messages.tokens column",
+     "ALTER TABLE ai_messages ADD COLUMN IF NOT EXISTS tokens INTEGER DEFAULT 0"),
+
+    # CRITICAL REPAIR: ai_messages.conversation_id was supposed to have
+    # REFERENCES ai_conversations(id) ON DELETE CASCADE, but because
+    # ai_messages already existed (with a different shape) when this table
+    # was first defined, CREATE TABLE IF NOT EXISTS silently skipped that
+    # FK along with everything else. Without it, deleting a conversation
+    # never cascades to its messages — they become permanently orphaned.
+    # Two steps: delete existing orphans (Postgres refuses to add a FK
+    # while violating rows exist), then add the FK for real.
+    ("delete orphaned ai_messages with no matching conversation",
+     "DELETE FROM ai_messages WHERE conversation_id NOT IN (SELECT id FROM ai_conversations)"),
+    ("add missing ai_messages -> ai_conversations foreign key",
+     """
+     DO $$
+     BEGIN
+         IF NOT EXISTS (
+             SELECT 1 FROM pg_constraint WHERE conname = 'ai_messages_conversation_id_fkey'
+         ) THEN
+             ALTER TABLE ai_messages
+                 ADD CONSTRAINT ai_messages_conversation_id_fkey
+                 FOREIGN KEY (conversation_id)
+                 REFERENCES ai_conversations(id)
+                 ON DELETE CASCADE;
+         END IF;
+     END $$
+     """),
+    ("index ai_conversations(username)",
+     "CREATE INDEX IF NOT EXISTS idx_ai_conversations_username ON ai_conversations(username, updated_at DESC)"),
+    ("index ai_messages(conversation_id)",
+     "CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation ON ai_messages(conversation_id, created_at)"),
+
+    # ── Phase 6: AI Security Copilot — CVE analysis cache ────────────────
+    # Same situation: an earlier minimal cve_ai_analysis table already
+    # exists in some deployments with only (cve_id, summary, explanation,
+    # guidance, attack_scenario, business_impact, analyzed_at, model_used)
+    # — missing technical_impact, recommended_actions, description_hash,
+    # status, retry_count, error_message, created_at, updated_at. Repaired
+    # below.
+    ("cve_ai_analysis table",
+     """
+     CREATE TABLE IF NOT EXISTS cve_ai_analysis (
+         cve_id              TEXT        PRIMARY KEY REFERENCES cves(cve_id) ON DELETE CASCADE,
+         summary             TEXT,
+         explanation         TEXT,
+         guidance            TEXT,
+         attack_scenario     TEXT,
+         business_impact     TEXT,
+         technical_impact    TEXT,
+         recommended_actions TEXT,
+         model_used          TEXT,
+         description_hash    TEXT,
+         status              TEXT        NOT NULL DEFAULT 'pending',
+         retry_count         INTEGER     NOT NULL DEFAULT 0,
+         error_message       TEXT,
+         analyzed_at         TIMESTAMPTZ,
+         created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+     )
+     """),
+    ("repair cve_ai_analysis.technical_impact column",
+     "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS technical_impact TEXT"),
+    ("repair cve_ai_analysis.recommended_actions column",
+     "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS recommended_actions TEXT"),
+    ("repair cve_ai_analysis.description_hash column",
+     "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS description_hash TEXT"),
+    ("repair cve_ai_analysis.status column",
+     "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending'"),
+    ("repair cve_ai_analysis.retry_count column",
+     "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0"),
+    ("repair cve_ai_analysis.error_message column",
+     "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS error_message TEXT"),
+    ("repair cve_ai_analysis.created_at column",
+     "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
+    ("repair cve_ai_analysis.updated_at column",
+     "ALTER TABLE cve_ai_analysis ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"),
+    # The status CHECK constraint is added separately (and defensively)
+    # because ADD COLUMN with an inline CHECK fails on tables that already
+    # have rows violating it; this guards the same way even when there
+    # are no rows yet.
+    ("add cve_ai_analysis.status CHECK constraint",
+     """
+     DO $$
+     BEGIN
+         IF NOT EXISTS (
+             SELECT 1 FROM pg_constraint WHERE conname = 'cve_ai_analysis_status_check'
+         ) THEN
+             ALTER TABLE cve_ai_analysis
+                 ADD CONSTRAINT cve_ai_analysis_status_check
+                 CHECK (status IN ('pending', 'processing', 'complete', 'failed'));
+         END IF;
+     END $$
+     """),
+    ("index cve_ai_analysis(status)",
+     "CREATE INDEX IF NOT EXISTS idx_cve_ai_analysis_status ON cve_ai_analysis(status)"),
+
+    # ── Phase 6 Requirement 5: trend analysis ────────────────────────────
+    # `matches` only holds current state, so "how does this week compare to
+    # last week" had no historical record to answer from at all.
+    # risk_snapshots stores one row per day with aggregate counts, written
+    # by a daily APScheduler job (see jobs/daily_scan.py).
+    ("risk_snapshots table",
+     """
+     CREATE TABLE IF NOT EXISTS risk_snapshots (
+         id                   SERIAL PRIMARY KEY,
+         snapshot_date        DATE        NOT NULL UNIQUE,
+         total_findings       INTEGER     NOT NULL DEFAULT 0,
+         open_findings        INTEGER     NOT NULL DEFAULT 0,
+         resolved_findings    INTEGER     NOT NULL DEFAULT 0,
+         kev_findings         INTEGER     NOT NULL DEFAULT 0,
+         overdue_findings     INTEGER     NOT NULL DEFAULT 0,
+         critical_findings    INTEGER     NOT NULL DEFAULT 0,
+         high_findings        INTEGER     NOT NULL DEFAULT 0,
+         avg_risk_score       NUMERIC,
+         max_risk_score       INTEGER,
+         total_assets         INTEGER     NOT NULL DEFAULT 0,
+         created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+     )
+     """),
+    ("index risk_snapshots(snapshot_date)",
+     "CREATE INDEX IF NOT EXISTS idx_risk_snapshots_date ON risk_snapshots(snapshot_date DESC)"),
+
+    # ── Phase 6 Requirement 8: chat response cache ───────────────────────
+    ("ai_response_cache table",
+     """
+     CREATE TABLE IF NOT EXISTS ai_response_cache (
+         cache_key   TEXT        PRIMARY KEY,
+         question    TEXT        NOT NULL,
+         response    TEXT        NOT NULL,
+         tokens      INTEGER     NOT NULL DEFAULT 0,
+         hit_count   INTEGER     NOT NULL DEFAULT 0,
+         created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         expires_at  TIMESTAMPTZ NOT NULL
+     )
+     """),
+    ("index ai_response_cache(expires_at)",
+     "CREATE INDEX IF NOT EXISTS idx_ai_response_cache_expires ON ai_response_cache(expires_at)"),
+
+    # ── City Exposure Overview feature ───────────────────────────────────
+    # Nullable on purpose: existing assets have no city/country data and
+    # must keep working unmodified. NULL/blank city is the documented
+    # "unassigned asset" case, not an error state.
+    ("assets.city column",
+     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS city VARCHAR(120)"),
+    ("assets.country_code column",
+     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS country_code CHAR(2)"),
+    ("index assets(country_code, city)",
+     "CREATE INDEX IF NOT EXISTS idx_assets_city_country ON assets (country_code, city)"),
+
+    # ── Asset metadata: exposure & network function ──────────────────────
+    # exposure defaults to 'Internal' rather than NULL — every asset has a
+    # real exposure state whether or not it's been reviewed yet.
+    ("assets.exposure column",
+     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS exposure TEXT NOT NULL DEFAULT 'Internal'"),
+    ("assets.exposure check constraint",
+     """
+     DO $$
+     BEGIN
+         IF NOT EXISTS (
+             SELECT 1 FROM information_schema.table_constraints
+             WHERE table_name = 'assets' AND constraint_name = 'assets_exposure_check'
+         ) THEN
+             ALTER TABLE assets ADD CONSTRAINT assets_exposure_check
+                 CHECK (exposure IN ('Internal', 'External'));
+         END IF;
+     END $$
+     """),
+    ("assets.function column",
+     "ALTER TABLE assets ADD COLUMN IF NOT EXISTS function TEXT"),
+    ("index assets(exposure)",
+     "CREATE INDEX IF NOT EXISTS idx_assets_exposure ON assets (exposure)"),
+    ("index assets(function)",
+     "CREATE INDEX IF NOT EXISTS idx_assets_function ON assets (function)"),
+
+    # ── Patch planning (per-finding) ─────────────────────────────────────
+    # Deliberately separate from matches.due_date: due_date is the
+    # auto-calculated SLA deadline; planned_patch_date is the analyst's
+    # own scheduling decision, never auto-computed or overwritten.
+    ("matches.planned_patch_date column",
+     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS planned_patch_date DATE"),
+    ("matches.patch_notes column",
+     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS patch_notes TEXT"),
+    ("index matches(planned_patch_date)",
+     "CREATE INDEX IF NOT EXISTS idx_matches_planned_patch_date ON matches (planned_patch_date)"),
 ]
 
-# Sanity-check at import time: version numbers must be unique and
-# strictly increasing in list order, since get_current_schema_version()
-# reports MAX(version) as "the" schema version and apply_pending_migrations()
-# relies on list order for human-readable progress reporting.
-_seen_versions = set()
-for _m in MIGRATIONS:
-    if _m.version in _seen_versions:
-        raise AssertionError(f"Duplicate migration version: {_m.version} ({_m.name!r})")
-    _seen_versions.add(_m.version)
-del _seen_versions, _m
+
+def _checksum(sql: str) -> str:
+    return hashlib.sha256(sql.encode("utf-8")).hexdigest()[:16]
 
 
-def apply_pending_migrations(conn, dry_run: bool = False) -> dict:
+def apply_pending_migrations(conn, dry_run: bool, continue_on_error: bool) -> dict:
     """
-    Step 8: run every migration in MIGRATIONS that has not already been
-    successfully applied with an identical checksum. Each migration runs
-    in its own transaction (via `with conn:`) so a single failing
-    migration rolls back only its own statement and does not poison or
-    abort the ones after it — matching the previous migrate.py's
-    behavior, and appropriate here because every migration is
-    independent/additive rather than a strict linear dependency chain
-    enforced by the database itself (dependencies are documented per
-    migration for human readers, not mechanically enforced, since the
-    IF NOT EXISTS guards make execution order forgiving in practice —
-    see each Migration's `depends_on`).
+    Applies every migration in MIGRATIONS whose name is not already
+    recorded in schema_version with status='success'. Each migration runs
+    in its own transaction. Returns a stats dict.
     """
-    applied, skipped, failed = [], [], []
+    stats = {"applied": 0, "skipped": 0, "failed": 0}
     total = len(MIGRATIONS)
 
-    for i, migration in enumerate(MIGRATIONS, start=1):
-        LOG.progress(i, total, migration.name)
-        checksum = migration.checksum
-        last_run = get_last_recorded_run(conn, migration.name)
+    with conn.cursor() as cur:
+        cur.execute("SELECT migration_name FROM schema_version WHERE status = 'success'")
+        already_applied = {row[0] for row in cur.fetchall()}
 
-        if last_run and last_run["status"] == "success" and last_run["checksum"] == checksum:
-            skipped.append(migration.name)
-            LOG.debug(f"Skipping '{migration.name}' — already applied with matching checksum.")
+    for i, (name, sql) in enumerate(MIGRATIONS, start=1):
+        Log.progress(i, total, name[:40])
+        if name in already_applied:
+            stats["skipped"] += 1
             continue
 
         if dry_run:
-            applied.append(migration.name)
+            print()
+            Log.info(f"[dry-run] would apply: {name}")
+            stats["applied"] += 1
             continue
 
         start = time.monotonic()
         try:
             with conn:
                 with conn.cursor() as cur:
-                    cur.execute(migration.sql)
-            duration_ms = int((time.monotonic() - start) * 1000)
-            record_migration(conn, migration.version, migration.name, checksum, "success", duration_ms)
-            applied.append(migration.name)
-            LOG.debug(f"Applied '{migration.name}' in {duration_ms}ms.")
+                    cur.execute(sql)
+                    cur.execute(
+                        """
+                        INSERT INTO schema_version
+                            (version, migration_name, duration_ms, checksum, status)
+                        VALUES (%s, %s, %s, %s, 'success')
+                        ON CONFLICT (migration_name)
+                        DO UPDATE SET status = 'success',
+                                      applied_at = NOW(),
+                                      duration_ms = EXCLUDED.duration_ms,
+                                      checksum = EXCLUDED.checksum
+                        """,
+                        (
+                            CURRENT_SCHEMA_VERSION,
+                            name,
+                            int((time.monotonic() - start) * 1000),
+                            _checksum(sql),
+                        ),
+                    )
+            stats["applied"] += 1
         except Exception as exc:
-            duration_ms = int((time.monotonic() - start) * 1000)
             conn.rollback()
+            stats["failed"] += 1
+            print()
+            Log.error(f"Migration '{name}' failed: {exc}")
+            # Record the failure on its own connection/transaction so a
+            # broken transaction state on `conn` doesn't also swallow this.
             try:
-                record_migration(conn, migration.version, migration.name, checksum,
-                                  "failed", duration_ms, error_message=str(exc))
+                with conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            INSERT INTO schema_version
+                                (version, migration_name, duration_ms, checksum, status)
+                            VALUES (%s, %s, %s, %s, 'failed')
+                            ON CONFLICT (migration_name)
+                            DO UPDATE SET status = 'failed', applied_at = NOW()
+                            """,
+                            (CURRENT_SCHEMA_VERSION, name,
+                             int((time.monotonic() - start) * 1000), _checksum(sql)),
+                        )
             except Exception:
                 conn.rollback()
-            failed.append((migration.name, str(exc)))
-            LOG.error(f"Migration '{migration.name}' failed: {exc}")
 
-    if not LOG.quiet and total:
-        print()  # newline after the progress bar
+            if not continue_on_error:
+                raise MigrationError(
+                    f"Stopping after migration '{name}' failed. Fix the underlying issue "
+                    f"and re-run — already-applied migrations will be skipped automatically. "
+                    f"Pass --continue-on-error to keep going instead."
+                ) from exc
 
-    return {"applied": applied, "skipped": skipped, "failed": failed}
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Views
-# ══════════════════════════════════════════════════════════════════════════
-
-_VIEW_STATEMENT_RE = re.compile(r"CREATE OR REPLACE VIEW\s+\w+\s+AS[\s\S]+?;")
-_VIEW_NAME_RE = re.compile(r"VIEW\s+(\w+)")
+    print()
+    return stats
 
 
-def create_or_replace_views(conn) -> dict:
+def seed_required_data(conn) -> None:
     """
-    Step 10: (re-)apply every `CREATE OR REPLACE VIEW` statement found in
-    schema.sql. Safe to run any number of times.
-
-    Anchored on `VIEW\\s+\\w+\\s+AS` rather than the bare phrase
-    "CREATE OR REPLACE VIEW" — a previous version of this extraction
-    regex matched that literal text anywhere, including inside a SQL
-    comment that mentioned the phrase as prose, silently producing a
-    malformed statement (comment text + the real view glued together)
-    that failed to execute while looking successful in isolation. This
-    regex requires the actual `VIEW <name> AS` syntax to follow it.
+    Seed baseline data required for a working install. ARGUS currently has
+    no baseline rows to insert — the first user account is created through
+    the web UI's registration flow (see dashboard/app.py's /register
+    route) rather than pre-seeded here. This function is intentionally a
+    documented no-op: it exists so a future release that *does* need
+    baseline rows (default roles, default config) has an established,
+    idempotent place to add them, using the same
+    INSERT ... ON CONFLICT DO NOTHING pattern as everything else in this
+    file.
     """
-    views_sql = read_schema_sql()
-    statements = _VIEW_STATEMENT_RE.findall(views_sql)
+    Log.info("No baseline data to seed (ARGUS users are created via web registration).")
 
-    created, failed = [], []
-    for stmt in statements:
-        m = _VIEW_NAME_RE.search(stmt)
-        name = m.group(1) if m else "unknown"
+
+def create_or_refresh_views(conn) -> dict:
+    """
+    Extract every `CREATE OR REPLACE VIEW ... ;` statement from schema.sql
+    and (re-)apply it. CREATE OR REPLACE VIEW is always safe to re-run.
+
+    Anchoring the regex on `VIEW\\s+\\w+\\s+AS` (not just the bare phrase)
+    is deliberate: matching the literal text "CREATE OR REPLACE VIEW"
+    anywhere would also match it inside an SQL comment that mentions the
+    phrase as prose, producing a malformed statement (comment text + the
+    real view glued together).
+    """
+    with open(SCHEMA_FILE, "r", encoding="utf-8") as fh:
+        views_sql = fh.read()
+
+    view_statements = re.findall(r"CREATE OR REPLACE VIEW\s+\w+\s+AS[\s\S]+?;", views_sql)
+    stats = {"created": 0, "failed": 0}
+
+    for stmt in view_statements:
+        match = re.search(r"VIEW\s+(\w+)", stmt)
+        label = match.group(1) if match else "unknown"
         try:
             with conn:
                 with conn.cursor() as cur:
                     cur.execute(stmt)
-            created.append(name)
-            LOG.debug(f"View '{name}' created/refreshed.")
+            Log.ok(f"view {label}")
+            stats["created"] += 1
         except Exception as exc:
             conn.rollback()
-            failed.append((name, str(exc)))
-            LOG.error(f"View '{name}' failed: {exc}")
+            Log.error(f"view {label} failed: {exc}")
+            stats["failed"] += 1
 
-    return {"created": created, "failed": failed}
+    return stats
+
+
+def create_missing_indexes(conn) -> dict:
+    """
+    Defensive final pass: every index in REQUIRED_INDEXES should already
+    have been created by MIGRATIONS above, but this confirms it and
+    creates anything still missing rather than assuming.
+    """
+    stats = {"created": 0, "already_present": 0}
+    index_ddl = {
+        "idx_matches_asset_id": "CREATE INDEX IF NOT EXISTS idx_matches_asset_id ON matches(asset_id)",
+        "idx_matches_cve_id": "CREATE INDEX IF NOT EXISTS idx_matches_cve_id ON matches(cve_id)",
+        "idx_matches_risk": "CREATE INDEX IF NOT EXISTS idx_matches_risk ON matches(risk_score DESC)",
+        "idx_matches_status": "CREATE INDEX IF NOT EXISTS idx_matches_status ON matches(status)",
+        "idx_matches_due_date": "CREATE INDEX IF NOT EXISTS idx_matches_due_date ON matches(due_date)",
+        "idx_matches_asset_cve": "CREATE INDEX IF NOT EXISTS idx_matches_asset_cve ON matches(asset_id, status)",
+        "idx_matches_planned_patch_date": "CREATE INDEX IF NOT EXISTS idx_matches_planned_patch_date ON matches(planned_patch_date)",
+        "idx_assets_type": "CREATE INDEX IF NOT EXISTS idx_assets_type ON assets(type)",
+        "idx_assets_exposure": "CREATE INDEX IF NOT EXISTS idx_assets_exposure ON assets(exposure)",
+        "idx_assets_function": "CREATE INDEX IF NOT EXISTS idx_assets_function ON assets(function)",
+        "idx_assets_city_country": "CREATE INDEX IF NOT EXISTS idx_assets_city_country ON assets(country_code, city)",
+        "idx_cves_kev": "CREATE INDEX IF NOT EXISTS idx_cves_kev ON cves(kev) WHERE kev = TRUE",
+        "idx_cves_cvss": "CREATE INDEX IF NOT EXISTS idx_cves_cvss ON cves(cvss DESC)",
+        "idx_ai_conversations_username": "CREATE INDEX IF NOT EXISTS idx_ai_conversations_username ON ai_conversations(username, updated_at DESC)",
+        "idx_ai_messages_conversation": "CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation ON ai_messages(conversation_id, created_at)",
+        "idx_cve_ai_analysis_status": "CREATE INDEX IF NOT EXISTS idx_cve_ai_analysis_status ON cve_ai_analysis(status)",
+        "idx_risk_snapshots_date": "CREATE INDEX IF NOT EXISTS idx_risk_snapshots_date ON risk_snapshots(snapshot_date DESC)",
+        "idx_ai_response_cache_expires": "CREATE INDEX IF NOT EXISTS idx_ai_response_cache_expires ON ai_response_cache(expires_at)",
+    }
+    with conn:
+        with conn.cursor() as cur:
+            for index_name, table in REQUIRED_INDEXES:
+                if not table_exists(cur, table):
+                    continue  # table itself missing -> not this step's job to report
+                if index_exists(cur, index_name):
+                    stats["already_present"] += 1
+                    continue
+                ddl = index_ddl.get(index_name)
+                if not ddl:
+                    continue
+                try:
+                    cur.execute(ddl)
+                    stats["created"] += 1
+                except Exception as exc:
+                    Log.error(f"Failed to create index {index_name}: {exc}")
+    return stats
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Data seeding / backfill
+# Verification (steps 12-18)
 # ══════════════════════════════════════════════════════════════════════════
 
-def seed_required_data(conn) -> dict:
-    """
-    Step 9. ARGUS does not seed default rows into `users` — the built-in
-    admin/viewer accounts are constructed in-memory at application
-    startup from ADMIN_PASSWORD/VIEWER_PASSWORD (see app.py), never
-    written to the database, so there is deliberately no "insert default
-    users" step here (that would invent behavior the application doesn't
-    have). What this step actually does is run the two real, existing,
-    idempotent backfill/cleanup operations that database/cve_analysis.py
-    already provides — moved here (from the previous migrate.py's
-    __main__ block) so they're part of the same tracked, reported run
-    instead of a separate uncounted afterthought.
-    """
-    results = {"queued": 0, "cleaned": 0, "errors": []}
-    try:
-        from database.cve_analysis import backfill_missing_analysis, cleanup_orphaned_analysis
-    except Exception as exc:
-        results["errors"].append(f"Could not import database.cve_analysis: {exc}")
-        return results
+def verify_foreign_keys(cur) -> bool:
+    all_ok = True
+    for table, column in REQUIRED_FOREIGN_KEYS:
+        if not table_exists(cur, table):
+            Log.check(f"FK {table}.{column}", False, "table missing")
+            all_ok = False
+            continue
+        ok = foreign_key_exists(cur, table, column)
+        Log.check(f"FK {table}.{column}", ok)
+        all_ok = all_ok and ok
+    return all_ok
 
-    try:
-        results["queued"] = backfill_missing_analysis()
-    except Exception as exc:
-        results["errors"].append(f"backfill_missing_analysis failed: {exc}")
 
-    try:
-        results["cleaned"] = cleanup_orphaned_analysis()
-    except Exception as exc:
-        results["errors"].append(f"cleanup_orphaned_analysis failed: {exc}")
+def verify_constraints(cur) -> bool:
+    all_ok = True
+    for table, column in REQUIRED_CHECK_CONSTRAINTS:
+        if not table_exists(cur, table):
+            Log.check(f"CHECK {table}.{column}", False, "table missing")
+            all_ok = False
+            continue
+        ok = check_constraint_exists(cur, table, column)
+        Log.check(f"CHECK {table}.{column}", ok)
+        all_ok = all_ok and ok
+    for table, columns in REQUIRED_UNIQUE_CONSTRAINTS:
+        if not table_exists(cur, table):
+            Log.check(f"UNIQUE {table}{columns}", False, "table missing")
+            all_ok = False
+            continue
+        ok = unique_constraint_exists(cur, table, columns)
+        Log.check(f"UNIQUE {table}{columns}", ok)
+        all_ok = all_ok and ok
+    return all_ok
 
+
+def verify_triggers(cur) -> None:
+    # ARGUS's actual schema defines no triggers today. This step exists so
+    # the day a migration adds one, verification is already wired up —
+    # nothing here to fail on an install that matches the real schema.
+    Log.info("ARGUS defines no database triggers today — nothing to verify.")
+
+
+def verify_functions(cur) -> None:
+    # Same story as triggers: no CREATE FUNCTION anywhere in schema.sql or
+    # migrate.py today.
+    Log.info("ARGUS defines no database functions today — nothing to verify.")
+
+
+def verify_required_tables(cur) -> dict:
+    results = {}
+    for table in REQUIRED_TABLES:
+        results[table] = table_exists(cur, table)
+        Log.check(table, results[table])
     return results
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# Verification
-# ══════════════════════════════════════════════════════════════════════════
-
-@dataclass
-class VerificationReport:
-    tables_ok: List[str] = field(default_factory=list)
-    tables_missing: List[str] = field(default_factory=list)
-    views_ok: List[str] = field(default_factory=list)
-    views_missing: List[str] = field(default_factory=list)
-    columns_ok: int = 0
-    columns_missing: List[str] = field(default_factory=list)
-    fks_ok: List[str] = field(default_factory=list)
-    fks_missing: List[str] = field(default_factory=list)
-    constraints_ok: List[str] = field(default_factory=list)
-    constraints_missing: List[str] = field(default_factory=list)
-    indexes_ok: List[str] = field(default_factory=list)
-    indexes_missing: List[str] = field(default_factory=list)
-    functions_ok: List[str] = field(default_factory=list)
-    functions_missing: List[str] = field(default_factory=list)
-    triggers_ok: List[str] = field(default_factory=list)
-    triggers_missing: List[str] = field(default_factory=list)
-
-    @property
-    def ok(self) -> bool:
-        return not (
-            self.tables_missing or self.views_missing or self.columns_missing
-            or self.fks_missing or self.constraints_missing or self.indexes_missing
-            or self.functions_missing or self.triggers_missing
-        )
+def verify_required_views(cur) -> dict:
+    results = {}
+    for view in REQUIRED_VIEWS:
+        results[view] = view_exists(cur, view)
+        Log.check(view, results[view])
+    return results
 
 
-def verify_schema(conn) -> VerificationReport:
-    """Steps 7 & 16-18: verify every required object actually exists,
-    rather than trusting that a CREATE statement which didn't raise
-    means the object is now in the expected shape."""
-    report = VerificationReport()
-
-    for t in REQUIRED_TABLES:
-        (report.tables_ok if table_exists(conn, t) else report.tables_missing).append(t)
-
-    for v in REQUIRED_VIEWS:
-        (report.views_ok if view_exists(conn, v) else report.views_missing).append(v)
-
-    for table, col in REQUIRED_COLUMNS:
-        if column_exists(conn, table, col):
-            report.columns_ok += 1
-        else:
-            report.columns_missing.append(f"{table}.{col}")
-
-    for fk in REQUIRED_FOREIGN_KEYS:
-        (report.fks_ok if foreign_key_exists(conn, fk) else report.fks_missing).append(fk)
-
-    for name, table in REQUIRED_CONSTRAINTS:
-        (report.constraints_ok if constraint_exists(conn, name, table) else report.constraints_missing).append(name)
-
-    for idx in REQUIRED_INDEXES:
-        (report.indexes_ok if index_exists(conn, idx) else report.indexes_missing).append(idx)
-
-    # Intentionally-empty lists (see REQUIRED_FUNCTIONS/REQUIRED_TRIGGERS
-    # docstring) — these loops simply do nothing and both *_missing lists
-    # stay empty, which is the correct, honest "0 expected" result.
-    for fn in REQUIRED_FUNCTIONS:
-        (report.functions_ok if function_exists(conn, fn) else report.functions_missing).append(fn)
-    for trg in REQUIRED_TRIGGERS:
-        (report.triggers_ok if trigger_exists(conn, trg) else report.triggers_missing).append(trg)
-
-    return report
+def verify_indexes(cur) -> dict:
+    results = {}
+    for index_name, table in REQUIRED_INDEXES:
+        if not table_exists(cur, table):
+            results[index_name] = False
+            continue
+        results[index_name] = index_exists(cur, index_name)
+    return results
 
 
-def verify_database(conn) -> VerificationReport:
-    """Public entry point used by --check and by the final verification
-    pass at the end of a normal run."""
-    return verify_schema(conn)
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Summary
-# ══════════════════════════════════════════════════════════════════════════
-
-def print_summary(
-    config: DBConfig,
-    migration_result: dict,
-    view_result: dict,
-    seed_result: dict,
-    report: VerificationReport,
-    schema_was_bootstrapped: bool,
-    elapsed_seconds: float,
-) -> None:
-    LOG.section("Migration Summary")
-
-    version = "unknown"
-    try:
-        pass  # populated by caller via get_current_schema_version before calling this
-    except Exception:
-        pass
-
-    print(f"  Target database:      {config.safe_repr}")
-    print(f"  Base schema bootstrap: {'performed (fresh install)' if schema_was_bootstrapped else 'not needed (already present)'}")
-    print(f"  Migrations applied:    {len(migration_result['applied'])}")
-    print(f"  Migrations skipped:    {len(migration_result['skipped'])} (already up to date)")
-    print(f"  Migrations failed:     {len(migration_result['failed'])}")
-    print(f"  Views created/verified: {len(view_result['created'])} / {len(REQUIRED_VIEWS)} required")
-    if view_result["failed"]:
-        print(f"  Views failed:          {len(view_result['failed'])}")
-    print(f"  AI analysis backfilled: {seed_result.get('queued', 0)} CVE(s) queued, "
-          f"{seed_result.get('cleaned', 0)} orphaned row(s) cleaned")
-    print()
-    print(f"  Required tables:      {len(report.tables_ok)}/{len(REQUIRED_TABLES)} present")
-    print(f"  Required views:       {len(report.views_ok)}/{len(REQUIRED_VIEWS)} present")
-    print(f"  Required columns:     {report.columns_ok}/{len(REQUIRED_COLUMNS)} present")
-    print(f"  Required foreign keys: {len(report.fks_ok)}/{len(REQUIRED_FOREIGN_KEYS)} present")
-    print(f"  Required constraints: {len(report.constraints_ok)}/{len(REQUIRED_CONSTRAINTS)} present")
-    print(f"  Required indexes:     {len(report.indexes_ok)}/{len(REQUIRED_INDEXES)} present")
-    print(f"  Custom functions:     {len(report.functions_ok)}/{len(REQUIRED_FUNCTIONS)} present (ARGUS defines none)")
-    print(f"  Custom triggers:      {len(report.triggers_ok)}/{len(REQUIRED_TRIGGERS)} present (ARGUS defines none)")
-    print()
-
-    for t in REQUIRED_TABLES:
-        mark = _Ansi.wrap("✓", _Ansi.GREEN) if t in report.tables_ok else _Ansi.wrap("✗", _Ansi.RED)
-        print(f"    {mark} {t}")
-
-    print()
-    if report.ok:
-        LOG.success(f"Database successfully initialized in {elapsed_seconds:.2f}s. Ready to launch ARGUS.")
-    else:
-        LOG.error(
-            f"Migration finished in {elapsed_seconds:.2f}s but verification found missing objects "
-            f"(see ✗ marks above and the lists below). ARGUS may not run correctly until these are resolved."
-        )
-        for label, missing in (
-            ("tables", report.tables_missing), ("views", report.views_missing),
-            ("columns", report.columns_missing), ("foreign keys", report.fks_missing),
-            ("constraints", report.constraints_missing), ("indexes", report.indexes_missing),
-        ):
-            if missing:
-                print(f"    Missing {label}: {', '.join(missing)}")
-
-    if migration_result["failed"]:
-        print()
-        LOG.error(f"{len(migration_result['failed'])} migration(s) failed to apply:")
-        for name, err in migration_result["failed"]:
-            print(f"    ✗ {name}: {err}")
-
-    if LOG.warnings:
-        print()
-        print(_Ansi.wrap(f"  {len(LOG.warnings)} warning(s) were logged during this run.", _Ansi.YELLOW))
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Orchestrator
-# ══════════════════════════════════════════════════════════════════════════
-
-TOTAL_STEPS = 19
-
-
-def run_migration(argv: Optional[Sequence[str]] = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="ARGUS database migration / installation tool.",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
+def get_database_version(cur) -> dict:
+    cur.execute(
+        "SELECT COUNT(*) FROM schema_version WHERE status = 'success'"
     )
-    parser.add_argument("--check", action="store_true",
-                        help="Verify the schema only; make no changes.")
-    parser.add_argument("--verbose", action="store_true",
-                        help="Print debug-level detail for every step.")
-    parser.add_argument("--quiet", action="store_true",
-                        help="Suppress INFO/SUCCESS output; only warnings/errors and the final summary.")
-    parser.add_argument("--no-color", action="store_true",
-                        help="Disable ANSI colors in output.")
-    parser.add_argument("--skip-create-db", action="store_true",
-                        help="Never attempt CREATE DATABASE; fail with instructions instead.")
-    args = parser.parse_args(argv)
+    applied_count = cur.fetchone()[0]
+    cur.execute(
+        "SELECT COUNT(*) FROM schema_version WHERE status = 'failed'"
+    )
+    failed_count = cur.fetchone()[0]
+    return {
+        "schema_version": CURRENT_SCHEMA_VERSION,
+        "migrations_applied": applied_count,
+        "migrations_failed": failed_count,
+        "migrations_total": len(MIGRATIONS),
+    }
 
-    if args.no_color:
-        _Ansi.ENABLED = False
 
-    global LOG
-    LOG = MigrationLogger(verbose=args.verbose, quiet=args.quiet)
+def verify_database(conn) -> bool:
+    """Runs the full verification checklist (steps 12-18). Returns overall pass/fail."""
+    with conn.cursor() as cur:
+        Log.step(12, 19, "Verifying foreign keys")
+        fk_ok = verify_foreign_keys(cur)
 
-    print(_Ansi.wrap("ARGUS Database Migration System", _Ansi.BOLD, _Ansi.CYAN))
-    print(_Ansi.wrap("=" * 34, _Ansi.GRAY))
+        Log.step(13, 19, "Verifying constraints")
+        constraints_ok = verify_constraints(cur)
 
-    config = load_config()
-    start_time = time.monotonic()
-    schema_was_bootstrapped = False
+        Log.step(14, 19, "Verifying triggers")
+        verify_triggers(cur)
 
-    # ── Step 1: verify server connectivity ──────────────────────────────
-    LOG.step(1, TOTAL_STEPS, f"Verifying PostgreSQL connection ({config.safe_repr}) ...")
-    ok, err = verify_postgres_connection(config)
-    if not ok:
-        LOG.error(err)
-        return 1
-    LOG.success("PostgreSQL server is reachable and credentials are valid.")
+        Log.step(15, 19, "Verifying functions")
+        verify_functions(cur)
 
-    # ── Step 2: database existence / creation ───────────────────────────
-    LOG.step(2, TOTAL_STEPS, f"Checking whether database '{config.database}' exists ...")
-    if args.check:
-        if not database_exists(config):
-            LOG.error(f"Database '{config.database}' does not exist. (--check: not creating it.)")
-            return 2
-        LOG.success(f"Database '{config.database}' exists.")
+        Log.step(16, 19, "Verifying required tables")
+        tables = verify_required_tables(cur)
+
+        Log.step(17, 19, "Verifying required views")
+        views = verify_required_views(cur)
+
+        Log.step(18, 19, "Checking database version")
+        version_info = get_database_version(cur)
+        Log.info(f"Schema version: {version_info['schema_version']}")
+        Log.info(
+            f"Migrations applied: {version_info['migrations_applied']}/"
+            f"{version_info['migrations_total']}"
+            + (f"  ({version_info['migrations_failed']} failed)"
+               if version_info["migrations_failed"] else "")
+        )
+
+    return (
+        fk_ok
+        and constraints_ok
+        and all(tables.values())
+        and all(views.values())
+        and version_info["migrations_failed"] == 0
+    )
+
+
+def print_summary(stats: dict, elapsed: float) -> None:
+    print("\n" + "=" * 72)
+    print("  ARGUS DATABASE MIGRATION SUMMARY")
+    print("=" * 72)
+    print(f"  Database Version     : {CURRENT_SCHEMA_VERSION}")
+    print(f"  Tables Verified       : {stats.get('tables_verified', 0)}")
+    print(f"  Migrations Applied    : {stats.get('migrations_applied', 0)}")
+    print(f"  Migrations Skipped    : {stats.get('migrations_skipped', 0)} (already applied)")
+    if stats.get("migrations_failed"):
+        print(f"  Migrations Failed     : {stats['migrations_failed']}")
+    print(f"  Views Created/Refreshed: {stats.get('views_created', 0)}")
+    print(f"  Indexes Created       : {stats.get('indexes_created', 0)}")
+    print(f"  Indexes Already Present: {stats.get('indexes_present', 0)}")
+    print(f"  Migration Time         : {elapsed:.2f}s")
+    print("=" * 72)
+    if stats.get("overall_ok"):
+        print("\n  Database successfully initialized. Ready to launch ARGUS.\n")
     else:
-        if not create_database_if_missing(config, allow_create=not args.skip_create_db):
-            return 2
-        LOG.success(f"Database '{config.database}' is ready.")
+        print(
+            "\n  Database migration completed with problems — see [ERROR] lines "
+            "above before launching ARGUS.\n"
+        )
 
-    # ── Step 3: connect to target database ──────────────────────────────
-    LOG.step(3, TOTAL_STEPS, "Connecting to target database ...")
-    try:
-        conn = get_target_connection(config)
-    except ServerUnreachable as exc:
-        LOG.error(str(exc))
-        return 1
-    LOG.success("Connected.")
 
-    try:
-        # ── Step 4: schema_version tracking table ───────────────────────
-        LOG.step(4, TOTAL_STEPS, "Ensuring schema_version tracking table exists ...")
-        if not args.check:
-            ensure_schema_version_table(conn)
-        version_table_present = table_exists(conn, SCHEMA_VERSION_TABLE)
-        LOG.success("schema_version table present." if version_table_present
-                    else "schema_version table missing (--check mode).")
-
-        # ── Step 5: check required tables ───────────────────────────────
-        LOG.step(5, TOTAL_STEPS, "Checking for required base tables ...")
-        missing_tables = [t for t in REQUIRED_TABLES if not table_exists(conn, t)]
-        core_missing = [t for t in ("assets", "cves", "matches") if t in missing_tables]
-        if missing_tables:
-            LOG.warn(f"{len(missing_tables)} required table(s) missing: {', '.join(missing_tables)}")
-        else:
-            LOG.success("All required tables already present.")
-
-        # ── Step 6: bootstrap schema.sql if needed ──────────────────────
-        LOG.step(6, TOTAL_STEPS, "Bootstrapping base schema (schema.sql) if needed ...")
-        if core_missing:
-            if args.check:
-                LOG.error(
-                    f"Core tables missing ({', '.join(core_missing)}) and --check "
-                    f"mode will not create them."
-                )
-            else:
-                LOG.info("Core tables missing — executing schema.sql ...")
-                try:
-                    execute_schema(conn)
-                    schema_was_bootstrapped = True
-                    LOG.success("schema.sql executed successfully.")
-                except Exception as exc:
-                    conn.rollback()
-                    LOG.error(f"Failed to execute schema.sql: {exc}")
-                    if args.verbose:
-                        traceback.print_exc()
-                    return 3
-        else:
-            LOG.success("Core tables already exist — schema.sql bootstrap not required.")
-            if not args.check:
-                # Still safe/cheap to run: every statement in schema.sql is
-                # idempotent, and this guarantees views/indexes defined
-                # there are current even on a long-lived database that
-                # never had schema.sql (re-)applied since those were added.
-                try:
-                    execute_schema(conn)
-                except Exception as exc:
-                    conn.rollback()
-                    LOG.warn(f"Re-running schema.sql for parity found an issue (non-fatal): {exc}")
-
-        # ── Step 7: verify schema.sql completed successfully ────────────
-        LOG.step(7, TOTAL_STEPS, "Verifying base schema landed correctly ...")
-        post_bootstrap_missing = [t for t in ("assets", "cves", "matches", "alerts", "reports", "users")
-                                   if not table_exists(conn, t)]
-        if post_bootstrap_missing:
-            LOG.error(f"Base tables still missing after schema.sql: {', '.join(post_bootstrap_missing)}")
-            return 3
-        LOG.success("Base schema verified.")
-
-        # ── Step 8: incremental migrations ──────────────────────────────
-        LOG.step(8, TOTAL_STEPS, f"Applying incremental migrations ({len(MIGRATIONS)} defined) ...")
-        migration_result = apply_pending_migrations(conn, dry_run=args.check)
-        if migration_result["failed"] and not args.check:
-            LOG.error(f"{len(migration_result['failed'])} migration(s) failed — see details below.")
-        else:
-            LOG.success(
-                f"{len(migration_result['applied'])} applied, "
-                f"{len(migration_result['skipped'])} already up to date."
-            )
-
-        # ── Step 9: seed / backfill required data ───────────────────────
-        LOG.step(9, TOTAL_STEPS, "Seeding/backfilling required data ...")
-        if args.check:
-            seed_result = {"queued": 0, "cleaned": 0, "errors": []}
-            LOG.info("Skipped in --check mode.")
-        else:
-            seed_result = seed_required_data(conn)
-            if seed_result["errors"]:
-                for e in seed_result["errors"]:
-                    LOG.warn(e)
-            LOG.success(
-                f"Queued {seed_result['queued']} CVE(s) for AI analysis; "
-                f"cleaned {seed_result['cleaned']} orphaned analysis row(s)."
-            )
-
-        # ── Step 10: create/verify views ────────────────────────────────
-        LOG.step(10, TOTAL_STEPS, "Creating/verifying database views ...")
-        if args.check:
-            view_result = {"created": [], "failed": []}
-            for v in REQUIRED_VIEWS:
-                LOG.info(f"  view {v}: {'present' if view_exists(conn, v) else 'MISSING'}")
-        else:
-            view_result = create_or_replace_views(conn)
-            if view_result["failed"]:
-                LOG.error(f"{len(view_result['failed'])} view(s) failed to create.")
-            else:
-                LOG.success(f"{len(view_result['created'])} view(s) created/refreshed.")
-
-        # ── Step 11: indexes ─────────────────────────────────────────────
-        LOG.step(11, TOTAL_STEPS, "Verifying indexes ...")
-        missing_idx = [i for i in REQUIRED_INDEXES if not index_exists(conn, i)]
-        if missing_idx:
-            LOG.warn(f"{len(missing_idx)} expected index(es) still missing: {', '.join(missing_idx)}")
-        else:
-            LOG.success(f"All {len(REQUIRED_INDEXES)} expected indexes present.")
-
-        # ── Step 12: foreign keys ────────────────────────────────────────
-        LOG.step(12, TOTAL_STEPS, "Verifying foreign keys ...")
-        missing_fks = [fk for fk in REQUIRED_FOREIGN_KEYS if not foreign_key_exists(conn, fk)]
-        if missing_fks:
-            LOG.error(f"Missing foreign key(s): {', '.join(missing_fks)}")
-        else:
-            LOG.success(f"All {len(REQUIRED_FOREIGN_KEYS)} expected foreign keys present.")
-
-        # ── Step 13: constraints ─────────────────────────────────────────
-        LOG.step(13, TOTAL_STEPS, "Verifying constraints ...")
-        missing_constraints = [n for n, t in REQUIRED_CONSTRAINTS if not constraint_exists(conn, n, t)]
-        if missing_constraints:
-            LOG.warn(f"Missing constraint(s): {', '.join(missing_constraints)}")
-        else:
-            LOG.success(f"All {len(REQUIRED_CONSTRAINTS)} expected constraints present.")
-
-        # ── Step 14: triggers ─────────────────────────────────────────────
-        LOG.step(14, TOTAL_STEPS, "Verifying triggers ...")
-        LOG.success(f"{len(REQUIRED_TRIGGERS)} expected (ARGUS defines no custom triggers).")
-
-        # ── Step 15: functions ────────────────────────────────────────────
-        LOG.step(15, TOTAL_STEPS, "Verifying functions ...")
-        LOG.success(f"{len(REQUIRED_FUNCTIONS)} expected (ARGUS defines no custom functions).")
-
-        # ── Step 16: verify every required table ─────────────────────────
-        LOG.step(16, TOTAL_STEPS, "Verifying every required table exists ...")
-        report = verify_schema(conn)
-        for t in REQUIRED_TABLES:
-            LOG._emit("SUCCESS" if t in report.tables_ok else "ERROR",
-                      _Ansi.GREEN if t in report.tables_ok else _Ansi.RED,
-                      f"{'✓' if t in report.tables_ok else '✗'} {t}", force=True)
-
-        # ── Step 17: verify every required view ──────────────────────────
-        LOG.step(17, TOTAL_STEPS, "Verifying every required view exists ...")
-        for v in REQUIRED_VIEWS:
-            LOG._emit("SUCCESS" if v in report.views_ok else "ERROR",
-                      _Ansi.GREEN if v in report.views_ok else _Ansi.RED,
-                      f"{'✓' if v in report.views_ok else '✗'} {v}", force=True)
-
-        # ── Step 18: verify database (schema) version ────────────────────
-        LOG.step(18, TOTAL_STEPS, "Verifying database schema version ...")
-        current_version = get_current_schema_version(conn)
-        target_version = MIGRATIONS[-1].version if MIGRATIONS else 0
-        if current_version >= target_version:
-            LOG.success(f"Schema version {current_version} (target {target_version}).")
-        else:
-            LOG.warn(f"Schema version {current_version} is behind target {target_version}.")
-
-        elapsed = time.monotonic() - start_time
-
-        # ── Step 19: final summary ────────────────────────────────────────
-        LOG.step(19, TOTAL_STEPS, "Final summary")
-        print_summary(config, migration_result, view_result, seed_result, report,
-                      schema_was_bootstrapped, elapsed)
-
-    finally:
-        conn.close()
-
-    if args.check:
-        return 0 if report.ok else 3
-    if migration_result["failed"]:
-        return 4
-    if not report.ok:
-        return 3
-    return 0
-
+# ══════════════════════════════════════════════════════════════════════════
+# Main flow
+# ══════════════════════════════════════════════════════════════════════════
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="ARGUS database migration system")
+    parser.add_argument("--verify-only", action="store_true",
+                         help="Only run the verification checklist against the current database.")
+    parser.add_argument("--dry-run", action="store_true",
+                         help="Show what would be applied without applying it.")
+    parser.add_argument("--continue-on-error", action="store_true",
+                         help="Keep applying later migrations after one fails.")
+    parser.add_argument("-y", "--yes", action="store_true",
+                         help="Don't prompt before creating the database.")
+    args = parser.parse_args()
+
+    start_time = time.monotonic()
+    stats = {}
+
+    print("ARGUS Database Migration\n")
+    print(f"  Target: {DB_CONFIG['user']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}\n")
+
+    total_steps = 19
+
+    # Step 1: verify connectivity to the PostgreSQL server itself.
+    Log.step(1, total_steps, "Verifying PostgreSQL connection")
     try:
-        return run_migration()
+        maint_conn = get_maintenance_connection()
     except MigrationError as exc:
-        LOG.error(str(exc))
-        return 5
-    except KeyboardInterrupt:
-        print()
-        LOG.error("Interrupted by user.")
-        return 130
-    except Exception as exc:  # noqa: BLE001 - top-level catch-all is intentional here
-        LOG.error(f"Unexpected error: {exc}")
-        traceback.print_exc()
-        return 5
+        Log.error(str(exc))
+        return 1
+    Log.ok(f"Connected to PostgreSQL server at {DB_CONFIG['host']}:{DB_CONFIG['port']}.")
+
+    # Step 2: does the target database exist? Create it if not (and we can).
+    Log.step(2, total_steps, f"Checking whether database '{DB_CONFIG['database']}' exists")
+    if not args.verify_only:
+        if not create_database_if_missing(maint_conn, DB_CONFIG["database"], args.yes):
+            maint_conn.close()
+            return 1
+    else:
+        if not database_exists(maint_conn, DB_CONFIG["database"]):
+            Log.error(f"Database '{DB_CONFIG['database']}' does not exist. Run without --verify-only first.")
+            maint_conn.close()
+            return 1
+        Log.ok(f"Database '{DB_CONFIG['database']}' exists.")
+    maint_conn.close()
+
+    # Step 3: connect to the target database.
+    Log.step(3, total_steps, f"Connecting to '{DB_CONFIG['database']}'")
+    try:
+        conn = _raw_connect(DB_CONFIG["database"])
+    except psycopg2.OperationalError as exc:
+        Log.error(classify_connection_error(exc))
+        return 1
+    Log.ok("Connected.")
+
+    try:
+        # Step 4: schema_version bookkeeping table.
+        Log.step(4, total_steps, "Ensuring schema_version table exists")
+        if not args.dry_run:
+            ensure_schema_version_table(conn)
+        Log.ok("schema_version ready.")
+
+        # Step 5: check core tables.
+        Log.step(5, total_steps, "Checking core tables")
+        with conn.cursor() as cur:
+            missing_core = verify_schema(cur, CORE_TABLES)
+        if missing_core:
+            Log.warn(f"Missing core tables: {', '.join(missing_core)}")
+        else:
+            Log.ok("All core tables present.")
+
+        # Step 6: execute schema.sql automatically if anything core is missing.
+        Log.step(6, total_steps, "Applying schema.sql if needed")
+        if missing_core and not args.verify_only:
+            if args.dry_run:
+                Log.info(f"[dry-run] would execute schema.sql to create: {', '.join(missing_core)}")
+            else:
+                execute_schema(conn)
+        elif missing_core and args.verify_only:
+            Log.error("Core tables missing and --verify-only was passed; nothing will be created.")
+        else:
+            Log.ok("schema.sql not needed — core tables already exist.")
+
+        # Step 7: verify schema.sql actually worked.
+        Log.step(7, total_steps, "Verifying core schema")
+        with conn.cursor() as cur:
+            still_missing = verify_schema(cur, CORE_TABLES)
+        if still_missing and not args.dry_run:
+            raise MigrationError(
+                f"Core tables still missing after schema.sql: {', '.join(still_missing)}. "
+                f"Check the [ERROR] output above from step 6."
+            )
+        Log.ok("Core schema verified.") if not still_missing else Log.warn("Skipped (dry-run).")
+
+        # Step 8: incremental migrations.
+        Log.step(8, total_steps, "Applying incremental migrations")
+        if not args.verify_only:
+            mig_stats = apply_pending_migrations(conn, args.dry_run, args.continue_on_error)
+        else:
+            mig_stats = {"applied": 0, "skipped": 0, "failed": 0}
+            Log.info("Skipped (--verify-only).")
+        stats["migrations_applied"] = mig_stats["applied"]
+        stats["migrations_skipped"] = mig_stats["skipped"]
+        stats["migrations_failed"] = mig_stats["failed"]
+
+        # Step 9: seed baseline data.
+        Log.step(9, total_steps, "Seeding required data")
+        if not args.verify_only and not args.dry_run:
+            seed_required_data(conn)
+        else:
+            Log.info("Skipped.")
+
+        # Step 10: create/refresh views.
+        Log.step(10, total_steps, "Creating/refreshing database views")
+        if not args.verify_only and not args.dry_run:
+            view_stats = create_or_refresh_views(conn)
+        else:
+            view_stats = {"created": 0, "failed": 0}
+            Log.info("Skipped.")
+        stats["views_created"] = view_stats["created"]
+
+        # Step 11: create any indexes still missing.
+        Log.step(11, total_steps, "Creating indexes")
+        if not args.verify_only and not args.dry_run:
+            index_stats = create_missing_indexes(conn)
+        else:
+            index_stats = {"created": 0, "already_present": 0}
+            Log.info("Skipped.")
+        stats["indexes_created"] = index_stats["created"]
+        stats["indexes_present"] = index_stats["already_present"]
+
+        # Steps 12-18: verification.
+        overall_ok = verify_database(conn)
+        stats["overall_ok"] = overall_ok
+        with conn.cursor() as cur:
+            stats["tables_verified"] = sum(1 for t in REQUIRED_TABLES if table_exists(cur, t))
+
+        # Step 19: summary.
+        Log.step(19, total_steps, "Final summary")
+        print_summary(stats, time.monotonic() - start_time)
+
+        # Step 9.5 (post-migration hook): queue any CVE that predates the
+        # AI analysis pipeline. Not one of the 19 numbered steps because
+        # it depends on database/cve_analysis.py, which itself depends on
+        # the connection pool in database/db.py — only safe to import once
+        # we're certain the database and its tables exist.
+        if not args.verify_only and not args.dry_run:
+            try:
+                sys.path.insert(0, os.path.dirname(SCRIPT_DIR))
+                from database.cve_analysis import backfill_missing_analysis
+                count = backfill_missing_analysis()
+                Log.info(f"Queued {count} CVE(s) that had no AI analysis row yet.")
+            except Exception as exc:
+                Log.warn(f"AI analysis backfill skipped: {exc}")
+
+        return 0 if overall_ok else 1
+
+    except MigrationError as exc:
+        Log.error(str(exc))
+        return 1
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":
